@@ -128,7 +128,35 @@ class SkinDocument(QObject):
 
     @staticmethod
     def _blank_white_armor(armor_type: str = "iron") -> np.ndarray:
-        """Return a 64×64 RGBA starter armor overlay with vanilla-like piece shapes."""
+        """Return a 64x64 RGBA starter armor overlay."""
+        # Embedded default template from:
+        #   - DiamondReference1_armor_main.png
+        #   - DiamondReference1_armor_leggings.png
+        try:
+            import base64
+            import zlib
+
+            main_b64 = (
+                "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"
+            )
+            legs_b64 = (
+                "eNrtVltPW0cQ5rkPVZsfkDw0qhR8Occ33LohTdoACbGtKlUqUCsUpQ1K1GekqvlHbR9aDDYE+9jGxjfiu+NjY+4YAqwXG5PStGH5Ori/oRUu5+GTZndnj863M/PNAOiBBg0aNGjQoEGDBg0aNGjQoOFCwZ4PrYwWI4f9qZlDQ9q/ctH4jxTnj9J4gx+PX+Hd+NTRReN/IznT+KG1iYF6FVejnsZF46+L/Na8lPThw4QPxuhk8//OV84rXC6EuSkf4oao58AY8whbToEpF4CBbDmnHEgFhesTXm6ITfF//IMNQ9zbNkQmu14fpOI8TJTrg40qTC9mYcoqcLIKnPtlSAkvzMUwXM1luA6WYCLb+nIed8nXsrsMXWy63fX5HvcKeVMVQ42qMOUVYc0F8fhwA+PtDVgyAZiSXkG2eEyg9xDWuPeUzk++aK3CmFe6Xh/M+SCcDYr3Wfwp72WKuZvWw/uVTvzP6sDNq7jPKf5ZP8y09+RwQzw5rqOvGObdzt9G/L9rrWO8tQZL3AuZ+N7aU/HRVgUy1YJE63v0HmPNVfQVwqD6h4tXxT2qCUuh+/mTjsGxqeLOXoViOw1d2o9bpAdjfA12ygdj0ou7+ypu0p6UUYhzELf3KsK6U4Mxp/Duz39F3N4nPvWK6M34Rd+iT4zxdXGjviR6SRuk7Jxw8iXxsLkmbCmf0GUDwl6vngw0qB6oJ3Q7f6saxXBzCUMHNZjLkY7G27dr6N1agky2YfE5bHXSB8p3G2m/XJrHEGnB2R3j4ixs2QB/UJpn/Skfu7bgYbZckH1TirBHKT8bTs0wRynMHMUws5NtzASYNeFlD2hN8zXrjU4ya05h919G2Nd0Z/SFnznP/FMz+7aEtyUteGr/ev/PBpic9DFLPshI/5g+Ps10WbLpHztr+sezPYnOaRZgRuJIPYH10fqdzBwfKS8gffo7nh1to6cUwqgaQ+v0LdoQ+OWkgaev6xh/vd3pJ5fp/UbovOPfrqNn0Yev6L6KP7CKv1A+PcbPJxzfH9Xx7fE2HIXQuZ+/+1OzfIK43NmpnbyXmRPu9HPx659MPGtvii/5srher4lPdmrCRf1VT/VzPR8SE4dbgvzFJao31+Ks+OnNnpig/vqQrwj39rLof1V762zWYKU567zz12cC/Cpp4ae7qqA8wcfUMx4113CFaub9lRL0qyV8Rr10gOYpc8aPa7FpfLBexs1dlfppAGa64yJ9vUL9pof8LxM+Z1UxSDUmJX3nXl8MsWluIa0wb6hCF5mEFPN05kc3q6IvH4KR+ot5XYVM0C94oCcf81q5s6ePemCMTWGQ+DvJ30H+5riv8y0TaZD0H/SXvwH6JcmX"
+            )
+
+            main_raw = zlib.decompress(base64.b64decode(main_b64))
+            legs_raw = zlib.decompress(base64.b64decode(legs_b64))
+            main_arr = np.frombuffer(main_raw, dtype=np.uint8).reshape((32, 64, 4)).copy()
+            legs_arr = np.frombuffer(legs_raw, dtype=np.uint8).reshape((32, 64, 4)).copy()
+            arr = np.zeros((64, 64, 4), dtype=np.uint8)
+            arr[0:32, :, :] = main_arr
+            arr[32:64, :, :] = legs_arr
+            return arr
+        except Exception:
+            # If reference loading fails for any reason, fall back to the
+            # built-in template logic below.
+            pass
+
+        # Fallback: generate a built-in vanilla-like armor template.
         from minepainter.skin_constants import OUTER_UV
 
         arr = np.zeros((64, 64, 4), dtype=np.uint8)
@@ -1025,7 +1053,7 @@ class SkinDocument(QObject):
         """
         from minepainter.io.skin_io import SkinIO
 
-        layer = SkinIO.load_armor_layer(path)  # shape (32, 64, 4)
+        layer = SkinIO.load_armor_layer(path, half="top")  # shape (32, 64, 4)
         self.push_undo_snapshot("armor")
         self.armor_image[0:32, :, :] = layer
         self.layer_replaced.emit("armor")
@@ -1038,7 +1066,7 @@ class SkinDocument(QObject):
         """
         from minepainter.io.skin_io import SkinIO
 
-        layer = SkinIO.load_armor_layer(path)  # shape (32, 64, 4)
+        layer = SkinIO.load_armor_layer(path, half="bottom")  # shape (32, 64, 4)
         self.push_undo_snapshot("armor")
         self.armor_image[32:64, :, :] = layer
         self.layer_replaced.emit("armor")

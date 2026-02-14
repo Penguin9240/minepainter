@@ -63,6 +63,44 @@ def _px_to_uv(px: int, py: int, pw: int, ph: int) -> tuple[float, float, float, 
     return u0, u1, v0, v1
 
 
+def _parse_uv_spec(
+    spec: tuple[int, int, int, int] | tuple[int, int, int, int, bool, bool]
+) -> tuple[int, int, int, int, bool, bool]:
+    """
+    Parse a UV spec tuple.
+
+    Supports:
+      (px, py, pw, ph)
+      (px, py, pw, ph, flip_u, flip_v)
+    """
+    if len(spec) == 4:
+        px, py, pw, ph = spec
+        return px, py, pw, ph, False, False
+    px, py, pw, ph, flip_u, flip_v = spec
+    return px, py, pw, ph, bool(flip_u), bool(flip_v)
+
+
+def _maybe_flip_uv(
+    uv: list[tuple[float, float]],
+    u0: float,
+    u1: float,
+    vt: float,
+    vb: float,
+    flip_u: bool,
+    flip_v: bool,
+) -> list[tuple[float, float]]:
+    if not flip_u and not flip_v:
+        return uv
+    out: list[tuple[float, float]] = []
+    for u, v in uv:
+        if flip_u:
+            u = u0 + u1 - u
+        if flip_v:
+            v = vt + vb - v
+        out.append((u, v))
+    return out
+
+
 def _build_face(
     v0: np.ndarray, v1: np.ndarray, v2: np.ndarray, v3: np.ndarray,
     uv_corners: list[tuple[float, float]],
@@ -89,7 +127,7 @@ def _build_face(
 def build_cuboid(
     w: float, h: float, d: float,
     cx: float, cy: float, cz: float,
-    uv_faces: dict[str, tuple[int, int, int, int]],
+    uv_faces: dict[str, tuple[int, int, int, int] | tuple[int, int, int, int, bool, bool]],
 ) -> np.ndarray:
     """
     Build the 36-vertex (6 faces × 6 verts) mesh for a single cuboid.
@@ -123,11 +161,16 @@ def build_cuboid(
 
     # --- Front face (+Z, facing the viewer) ---
     if "front" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["front"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["front"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         # Quad corners BL, BR, TR, TL from the viewer's perspective
         faces.append(_build_face(
             corners["llf"], corners["rlf"], corners["ruf"], corners["luf"],
-            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            uv,
             np.array([0, 0, 1], dtype=np.float32),
         ))
 
@@ -135,48 +178,73 @@ def build_cuboid(
     # Back face UVs are read right-to-left in the Minecraft skin net,
     # so u0 and u1 are swapped.
     if "back" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["back"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["back"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         faces.append(_build_face(
             corners["rlb"], corners["llb"], corners["lub"], corners["rub"],
-            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            uv,
             np.array([0, 0, -1], dtype=np.float32),
         ))
 
     # --- Right face (+X, character's right) ---
     if "right" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["right"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["right"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         faces.append(_build_face(
             corners["rlf"], corners["rlb"], corners["rub"], corners["ruf"],
-            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            uv,
             np.array([1, 0, 0], dtype=np.float32),
         ))
 
     # --- Left face (-X, character's left) ---
     if "left" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["left"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["left"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         faces.append(_build_face(
             corners["llb"], corners["llf"], corners["luf"], corners["lub"],
-            [(u0, vb), (u1, vb), (u1, vt), (u0, vt)],
+            uv,
             np.array([-1, 0, 0], dtype=np.float32),
         ))
 
     # --- Top face (+Y) ---
     if "top" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["top"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["top"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vt), (u1, vt), (u1, vb), (u0, vb)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         # Top face uses the upper corners; U runs along +X, V along +Z
         faces.append(_build_face(
             corners["luf"], corners["ruf"], corners["rub"], corners["lub"],
-            [(u0, vt), (u1, vt), (u1, vb), (u0, vb)],
+            uv,
             np.array([0, 1, 0], dtype=np.float32),
         ))
 
     # --- Bottom face (-Y) ---
     if "bottom" in uv_faces:
-        u0, u1, vt, vb = _px_to_uv(*uv_faces["bottom"])
+        px, py, pw, ph, flip_u, flip_v = _parse_uv_spec(uv_faces["bottom"])
+        u0, u1, vt, vb = _px_to_uv(px, py, pw, ph)
+        uv = _maybe_flip_uv(
+            [(u0, vt), (u1, vt), (u1, vb), (u0, vb)],
+            u0, u1, vt, vb, flip_u, flip_v
+        )
         # Bottom face uses the lower corners; U runs along +X, V along +Z
         faces.append(_build_face(
             corners["rlf"], corners["llf"], corners["llb"], corners["rlb"],
-            [(u0, vt), (u1, vt), (u1, vb), (u0, vb)],
+            uv,
             np.array([0, -1, 0], dtype=np.float32),
         ))
 
@@ -321,11 +389,42 @@ def _armor_split_uv_for_part(part: str) -> dict[str, tuple[int, int, int, int]]:
     Arms and legs use the legacy single-template regions (right arm/leg).
     """
     if part == "head":
-        return BASE_UV["head"]
+        uv = BASE_UV["head"]
+        return {
+            "top": uv["top"],
+            "bottom": uv["bottom"],
+            "front": uv["front"],
+            "back": uv["back"],
+            # Rotate helmet sides 180 degrees around Z (up/down axis):
+            # horizontal mirror only on side faces.
+            "right": (uv["right"][0], uv["right"][1], uv["right"][2], uv["right"][3], True, False),
+            "left": (uv["left"][0], uv["left"][1], uv["left"][2], uv["left"][3], True, False),
+        }
     if part == "body":
         return BASE_UV["body"]
-    if part in ("r_arm", "l_arm"):
-        return BASE_UV["r_arm"]
+    if part == "r_arm":
+        # Right arm only: keep side faces normal, swap front/back.
+        uv = BASE_UV["r_arm"]
+        return {
+            "top": uv["top"],
+            "bottom": uv["bottom"],
+            "front": uv["back"],
+            "back": uv["front"],
+            "right": uv["right"],
+            "left": uv["left"],
+        }
+    if part == "l_arm":
+        # Legacy armor uses one arm template. Mirror side faces so the left arm
+        # shades correctly instead of looking like a duplicated right arm.
+        uv = BASE_UV["r_arm"]
+        return {
+            "top": uv["top"],
+            "bottom": uv["bottom"],
+            "front": uv["front"],
+            "back": uv["back"],
+            "right": uv["left"],
+            "left": uv["right"],
+        }
     if part in ("r_leg", "l_leg"):
         # Leggings are loaded into lower half.
         return _uv_with_y_offset(BASE_UV["r_leg"], 32)

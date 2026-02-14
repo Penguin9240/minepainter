@@ -90,15 +90,30 @@ class SkinIO:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def load_armor_layer(path: Path) -> np.ndarray:
-        """Load a single legacy armor-layer PNG as uint8 RGBA (32, 64, 4)."""
+    def load_armor_layer(path: Path, half: str | None = None) -> np.ndarray:
+        """
+        Load one armor layer as uint8 RGBA (32, 64, 4).
+
+        Accepted source sizes:
+          - 64x32: returned directly
+          - 64x64: requires half='top' or half='bottom'
+        """
         img = Image.open(path).convert("RGBA")
         w, h = img.size
-        if (w, h) != SkinIO.VALID_ARMOR_LAYER_SIZE:
+        if (w, h) == SkinIO.VALID_ARMOR_LAYER_SIZE:
+            return np.array(img, dtype=np.uint8)
+        if (w, h) == (64, 64):
+            arr = np.array(img, dtype=np.uint8)
+            if half == "top":
+                return arr[0:32, :, :].copy()
+            if half == "bottom":
+                return arr[32:64, :, :].copy()
             raise ValueError(
-                f"Invalid armor layer size {w}x{h}. Expected 64x32."
+                "64x64 armor source requires half='top' or half='bottom'."
             )
-        return np.array(img, dtype=np.uint8)
+        raise ValueError(
+            f"Invalid armor layer size {w}x{h}. Expected 64x32 (or 64x64 with half)."
+        )
 
     @staticmethod
     def save_armor_layer(path: Path, armor_layer: np.ndarray) -> None:

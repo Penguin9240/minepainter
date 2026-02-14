@@ -11,16 +11,29 @@ from minepainter.io.skin_io import SkinIO
 
 
 class ArmorExportRoundTripTests(unittest.TestCase):
+    @staticmethod
+    def _reference_paths(repo_root: Path) -> tuple[Path, Path]:
+        preferred = (
+            repo_root / "DiamondReference1_armor_main.png",
+            repo_root / "DiamondReference1_armor_leggings.png",
+        )
+        fallback = (
+            repo_root / "DiamondReference1.png",
+            repo_root / "DiamondReference2.png",
+        )
+        if preferred[0].exists() and preferred[1].exists():
+            return preferred
+        return fallback
+
     def test_reference_armor_files_load_save_without_changes(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        ref_main_path = repo_root / "DiamondReference1.png"
-        ref_leggings_path = repo_root / "DiamondReference2.png"
+        ref_main_path, ref_leggings_path = self._reference_paths(repo_root)
 
         self.assertTrue(ref_main_path.exists(), f"Missing {ref_main_path}")
         self.assertTrue(ref_leggings_path.exists(), f"Missing {ref_leggings_path}")
 
-        ref_main = SkinIO.load_armor_layer(ref_main_path)
-        ref_leggings = SkinIO.load_armor_layer(ref_leggings_path)
+        ref_main = SkinIO.load_armor_layer(ref_main_path, half="top")
+        ref_leggings = SkinIO.load_armor_layer(ref_leggings_path, half="bottom")
         self.assertEqual(ref_main.shape, (32, 64, 4))
         self.assertEqual(ref_leggings.shape, (32, 64, 4))
 
@@ -38,11 +51,10 @@ class ArmorExportRoundTripTests(unittest.TestCase):
 
     def test_reference_files_load_into_correct_armor_halves(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        ref_main_path = repo_root / "DiamondReference1.png"
-        ref_leggings_path = repo_root / "DiamondReference2.png"
+        ref_main_path, ref_leggings_path = self._reference_paths(repo_root)
 
-        ref_main = SkinIO.load_armor_layer(ref_main_path)
-        ref_leggings = SkinIO.load_armor_layer(ref_leggings_path)
+        ref_main = SkinIO.load_armor_layer(ref_main_path, half="top")
+        ref_leggings = SkinIO.load_armor_layer(ref_leggings_path, half="bottom")
 
         doc = SkinDocument()
         doc.armor_image = np.zeros((64, 64, 4), dtype=np.uint8)
