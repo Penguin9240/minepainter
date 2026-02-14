@@ -16,6 +16,8 @@ from PySide6.QtGui import QAction
 class AppToolBar(QToolBar):
     new_requested          = Signal()
     open_requested         = Signal()
+    open_armor_main_requested = Signal()
+    open_armor_leggings_requested = Signal()
     save_requested         = Signal()
     save_as_requested      = Signal()
     reset_requested        = Signal()
@@ -56,6 +58,16 @@ class AppToolBar(QToolBar):
         self._act_open.setShortcut("Ctrl+O")
         self._act_open.triggered.connect(self.open_requested)
         self.addAction(self._act_open)
+
+        self._act_open_armor_main = QAction("Open Armor Main…", self)
+        self._act_open_armor_main.setToolTip("Load a 64x32 main armor file into armor rows 0..31")
+        self._act_open_armor_main.triggered.connect(self.open_armor_main_requested)
+        self.addAction(self._act_open_armor_main)
+
+        self._act_open_armor_leggings = QAction("Open Leggings…", self)
+        self._act_open_armor_leggings.setToolTip("Load a 64x32 leggings file into armor rows 32..63")
+        self._act_open_armor_leggings.triggered.connect(self.open_armor_leggings_requested)
+        self.addAction(self._act_open_armor_leggings)
 
         self._act_save = QAction("Save", self)
         self._act_save.setShortcut("Ctrl+S")

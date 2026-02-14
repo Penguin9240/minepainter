@@ -302,6 +302,36 @@ def _part_center(part: str, spread_out: bool) -> tuple[float, float, float]:
     return cx, cy, cz
 
 
+def _uv_with_y_offset(
+    uv_faces: dict[str, tuple[int, int, int, int]],
+    y_offset: int,
+) -> dict[str, tuple[int, int, int, int]]:
+    out: dict[str, tuple[int, int, int, int]] = {}
+    for face, (x, y, w, h) in uv_faces.items():
+        out[face] = (x, y + y_offset, w, h)
+    return out
+
+
+def _armor_split_uv_for_part(part: str) -> dict[str, tuple[int, int, int, int]]:
+    """
+    UV mapping for split armor files packed into one 64x64 texture:
+      - rows 0..31   : main armor (helmet/chest/arms/boots)
+      - rows 32..63  : leggings
+
+    Arms and legs use the legacy single-template regions (right arm/leg).
+    """
+    if part == "head":
+        return BASE_UV["head"]
+    if part == "body":
+        return BASE_UV["body"]
+    if part in ("r_arm", "l_arm"):
+        return BASE_UV["r_arm"]
+    if part in ("r_leg", "l_leg"):
+        # Leggings are loaded into lower half.
+        return _uv_with_y_offset(BASE_UV["r_leg"], 32)
+    return OUTER_UV[part]
+
+
 def build_stand_meshes() -> dict[str, np.ndarray]:
     """
     Build the untextured geometry for a Minecraft armor stand.
@@ -375,7 +405,7 @@ def build_stand_body_meshes(
         outer = part + "_outer"
         w, h, d = dims[outer]
         cx, cy, cz = _part_center(part, spread_out)
-        meshes[outer] = build_cuboid(w, h, d, cx, cy, cz, OUTER_UV[part])
+        meshes[outer] = build_cuboid(w, h, d, cx, cy, cz, _armor_split_uv_for_part(part))
 
     return _apply_pose(meshes, pose)
 
@@ -416,7 +446,7 @@ def build_all_meshes(
         base = outer_part.replace("_outer", "")
         w, h, d = dims[outer_part]
         cx, cy, cz = _part_center(base, spread_out)
-        uv_faces = OUTER_UV[base]
+        uv_faces = _armor_split_uv_for_part(base)
         meshes[outer_part] = build_cuboid(w, h, d, cx, cy, cz, uv_faces)
 
     # Extra raised boot shells around the lower legs.
@@ -429,8 +459,9 @@ def build_all_meshes(
         by = 2.0
         if spread_out:
             by = 0.5
-        leg_uv = OUTER_UV[leg]
-        # Map boots to lower 4 rows of the leg side UV faces.
+        # Boots come from main armor file in top half, using legacy right-leg UV.
+        leg_uv = BASE_UV["r_leg"]
+        # Map boots to lower 4 rows of the leg side UV faces in main layer.
         boot_uv = {
             "right":  (leg_uv["right"][0],  leg_uv["right"][1] + 8, 4, 4),
             "front":  (leg_uv["front"][0],  leg_uv["front"][1] + 8, 4, 4),

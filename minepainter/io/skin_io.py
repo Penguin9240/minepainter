@@ -73,8 +73,11 @@ class SkinIO:
         if armor_array is not None:
             armor_rgba = SkinIO._normalize_rgba(armor_array)
             if armor_rgba[:, :, 3].any():
-                armor_clean = SkinIO._sanitize_armor_uv(armor_rgba)
-                main_armor, leggings_armor = SkinIO._split_armor_layers_64x32(armor_clean)
+                # Split export is a direct 64x64 -> two 64x32 halves.
+                # Top half stores helmet/chest/arms/boots.
+                # Bottom half stores leggings.
+                main_armor = armor_rgba[0:32, :, :].copy()
+                leggings_armor = armor_rgba[32:64, :, :].copy()
 
                 main_path = path.with_name(path.stem + "_armor_main" + path.suffix)
                 Image.fromarray(main_armor, mode="RGBA").save(main_path)

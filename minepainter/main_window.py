@@ -124,6 +124,8 @@ class MainWindow(QMainWindow):
         tb.home_requested.connect(self._on_home)
         tb.new_requested.connect(self._on_new)
         tb.open_requested.connect(self._on_open)
+        tb.open_armor_main_requested.connect(self._on_open_armor_main)
+        tb.open_armor_leggings_requested.connect(self._on_open_armor_leggings)
         tb.save_requested.connect(self._on_save)
         tb.save_as_requested.connect(self._on_save_as)
         tb.reset_requested.connect(self._on_reset)
@@ -217,6 +219,32 @@ class MainWindow(QMainWindow):
             self._status.showMessage(f"Opened: {path_str}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not open file:\n{e}")
+
+    def _on_open_armor_main(self) -> None:
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Open Armor Main PNG (64x32)", "", "PNG files (*.png)"
+        )
+        if not path_str:
+            return
+        try:
+            self.document.load_armor_main_file(Path(path_str))
+            self._tool_panel.tool_state.set_layer("armor")
+            self._status.showMessage(f"Loaded armor main: {path_str}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not open armor main file:\n{e}")
+
+    def _on_open_armor_leggings(self) -> None:
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Open Leggings PNG (64x32)", "", "PNG files (*.png)"
+        )
+        if not path_str:
+            return
+        try:
+            self.document.load_armor_leggings_file(Path(path_str))
+            self._tool_panel.tool_state.set_layer("armor")
+            self._status.showMessage(f"Loaded leggings: {path_str}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not open leggings file:\n{e}")
 
     def _on_save(self) -> None:
         if self.document.filepath is None:

@@ -1018,6 +1018,32 @@ class SkinDocument(QObject):
         self.dirty_changed.emit(False)
         self.clear_undo()
 
+    def load_armor_main_file(self, path: Path) -> None:
+        """
+        Load a 64x32 armor-main PNG into the upper half (rows 0..31)
+        of the 64x64 armor overlay.
+        """
+        from minepainter.io.skin_io import SkinIO
+
+        layer = SkinIO.load_armor_layer(path)  # shape (32, 64, 4)
+        self.push_undo_snapshot("armor")
+        self.armor_image[0:32, :, :] = layer
+        self.layer_replaced.emit("armor")
+        self._mark_dirty()
+
+    def load_armor_leggings_file(self, path: Path) -> None:
+        """
+        Load a 64x32 leggings PNG into the lower half (rows 32..63)
+        of the 64x64 armor overlay.
+        """
+        from minepainter.io.skin_io import SkinIO
+
+        layer = SkinIO.load_armor_layer(path)  # shape (32, 64, 4)
+        self.push_undo_snapshot("armor")
+        self.armor_image[32:64, :, :] = layer
+        self.layer_replaced.emit("armor")
+        self._mark_dirty()
+
     def save_to_file(self, path: Path) -> None:
         from minepainter.io.skin_io import SkinIO
         SkinIO.save(path, self.base_image, self.armor_image)
