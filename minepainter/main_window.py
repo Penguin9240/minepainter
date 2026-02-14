@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox, QStatusBar,
     QWidget, QVBoxLayout,
     QApplication, QDialog, QDialogButtonBox, QFormLayout,
-    QRadioButton, QButtonGroup, QHBoxLayout, QLineEdit, QCheckBox,
+    QRadioButton, QButtonGroup, QHBoxLayout, QLineEdit, QCheckBox, QComboBox,
 )
 
 from minepainter.document import SkinDocument
@@ -28,6 +28,9 @@ from minepainter.app_settings import (
     save_theme,
     load_openai_api_key,
     save_openai_api_key,
+    load_openai_model,
+    save_openai_model,
+    OPENAI_MODELS,
     load_debug_mode,
     save_debug_mode,
     THEME_DARK,
@@ -345,6 +348,14 @@ class MainWindow(QMainWindow):
         api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addRow("OpenAI API key:", api_key_input)
 
+        model_combo = QComboBox(dialog)
+        for model_name in OPENAI_MODELS:
+            model_combo.addItem(model_name, model_name)
+        current_model = load_openai_model()
+        model_idx = model_combo.findData(current_model)
+        model_combo.setCurrentIndex(model_idx if model_idx >= 0 else 0)
+        layout.addRow("AI model:", model_combo)
+
         debug_check = QCheckBox("Enable debug mode (AI logs to terminal)", dialog)
         debug_check.setChecked(load_debug_mode())
         layout.addRow("Debug mode:", debug_check)
@@ -363,6 +374,7 @@ class MainWindow(QMainWindow):
         theme = THEME_LIGHT if theme_light.isChecked() else THEME_DARK
         save_theme(theme)
         save_openai_api_key(api_key_input.text())
+        save_openai_model(str(model_combo.currentData()))
         save_debug_mode(debug_check.isChecked())
 
         app = QApplication.instance()

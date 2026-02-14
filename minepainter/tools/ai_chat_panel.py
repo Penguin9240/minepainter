@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
 )
 
-from minepainter.app_settings import load_openai_api_key, load_debug_mode
+from minepainter.app_settings import load_openai_api_key, load_debug_mode, load_openai_model
 from minepainter.document import SkinDocument
 
 
@@ -157,6 +157,7 @@ def _parse_payload(text: str) -> tuple[str, str]:
 
 def request_ai_armor_reply(
     api_key: str,
+    model: str,
     user_text: str,
     armor_state_text: str,
     history_text: str,
@@ -197,7 +198,7 @@ def request_ai_armor_reply(
         user_payload = base_user_payload + retry_suffix
         _debug_log(f"OUTBOUND_USER_ATTEMPT_{attempt}", user_payload)
         response = client.responses.create(
-            model="gpt-4.1-mini",
+            model=model,
             temperature=0,
             max_output_tokens=40000,
             text={
@@ -249,6 +250,7 @@ class _AIRequestThread(QThread):
     def __init__(
         self,
         api_key: str,
+        model: str,
         user_text: str,
         armor_state_text: str,
         history_text: str,
@@ -256,6 +258,7 @@ class _AIRequestThread(QThread):
     ) -> None:
         super().__init__()
         self._api_key = api_key
+        self._model = model
         self._user_text = user_text
         self._armor_state_text = armor_state_text
         self._history_text = history_text
@@ -265,6 +268,7 @@ class _AIRequestThread(QThread):
         try:
             message, armor_state = request_ai_armor_reply(
                 self._api_key,
+                self._model,
                 self._user_text,
                 self._armor_state_text,
                 self._history_text,
@@ -335,6 +339,7 @@ class AIChatPanel(QWidget):
             self._append("System", "Set your OpenAI API key in Settings first.")
             self.status_message.emit("Missing OpenAI API key.")
             return
+        model = load_openai_model().strip()
 
         armor_state = self._document.get_armor_state_text()
         self._append("You", text)
@@ -346,8 +351,9 @@ class AIChatPanel(QWidget):
         debug_mode = load_debug_mode()
         if debug_mode:
             print(f"[AI DEBUG] UI outbound user message:\n{text}\n", flush=True)
+            print(f"[AI DEBUG] UI selected model:\n{model}\n", flush=True)
             print(f"[AI DEBUG] UI outbound armor_state:\n{armor_state}\n", flush=True)
-        self._worker = _AIRequestThread(api_key, text, armor_state, history_text, debug_mode)
+        self._worker = _AIRequestThread(api_key, model, text, armor_state, history_text, debug_mode)
         self._worker.finished_payload.connect(self._on_result)
         self._worker.failed.connect(self._on_error)
         self._worker.finished.connect(self._on_worker_finished)
