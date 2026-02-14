@@ -17,7 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox, QStatusBar,
-    QWidget, QVBoxLayout,
+    QWidget, QVBoxLayout, QScrollArea,
 )
 
 from minepainter.document import SkinDocument
@@ -55,20 +55,29 @@ class MainWindow(QMainWindow):
         # --- Layout ---
         # Left column: UV editor on top, tool strip below it
         left_col = QWidget()
+        left_col.setMaximumWidth(360)
         left_vbox = QVBoxLayout(left_col)
         left_vbox.setContentsMargins(0, 0, 0, 0)
         left_vbox.setSpacing(0)
+        self._uv_editor.setMaximumHeight(360)
         left_vbox.addWidget(self._uv_editor, stretch=1)
-        left_vbox.addWidget(self._tool_panel.tool_strip(), stretch=0)
+        tool_scroll = QScrollArea()
+        tool_scroll.setWidget(self._tool_panel.tool_strip())
+        tool_scroll.setWidgetResizable(True)
+        tool_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        tool_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        tool_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        left_vbox.addWidget(tool_scroll, stretch=0)
 
         # Main horizontal splitter: left col | viewport | color panel
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_col)
         splitter.addWidget(self._viewport)
         splitter.addWidget(self._tool_panel.color_panel())
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        splitter.setSizes([420, 1180, 240])
         self.setCentralWidget(splitter)
 
         # --- Status bar ---
@@ -84,10 +93,10 @@ class MainWindow(QMainWindow):
             idx = combo.findData("armor")
             if idx >= 0:
                 combo.setCurrentIndex(idx)
-            # Show the armor stand in the 3D viewport
-            self._viewport.set_show_stand(True)
-            # Fill armor with grey default so the stand looks clothed from the start
-            self.document.armor_image = self.document._blank_white_armor()
+            # Keep a clean "invisible player" preview (no stand rods/base)
+            self._viewport.set_show_stand(False)
+            # Fill armor with a detailed diamond preset so armor mode starts styled
+            self.document.armor_image = self.document._blank_white_armor("diamond")
             # Hide the base skin layer BEFORE the GL context initializes so the
             # renderer picks up base_visible=False from the document on first paint.
             # Also uncheck the toolbar toggle so the UI is consistent.
@@ -122,6 +131,18 @@ class MainWindow(QMainWindow):
         tb.skin_type_changed.connect(self._on_skin_type_changed)
 
         self.document.dirty_changed.connect(self._update_title)
+        self._tool_panel.armor_part_visibility_changed.connect(
+            self._viewport.set_armor_part_visible
+        )
+        self._tool_panel.base_part_visibility_changed.connect(
+            self._viewport.set_base_part_visible
+        )
+        self._tool_panel.spread_out_mode_changed.connect(
+            self._viewport.set_spread_out_mode
+        )
+        self._tool_panel.pose_changed.connect(
+            self._viewport.set_pose
+        )
 
         # Dropper result from UV editor → tool panel
         self._uv_editor.color_picked.connect(

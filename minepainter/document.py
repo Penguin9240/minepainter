@@ -128,96 +128,867 @@ class SkinDocument(QObject):
 
     @staticmethod
     def _blank_white_armor(armor_type: str = "iron") -> np.ndarray:
-        """Return a 64×64 RGBA image styled as default iron armor.
-
-        Uses the real Minecraft iron armor palette (pure greyscale, 7 tones).
-        Each face gets:
-          - 1-px dark border
-          - mid-tone fill — the dominant vanilla color
-          - lighter inner panel to break up large flat areas
-          - 1-px highlight on the top-left inner edge
-          - single specular dot on top-left corner (white)
-
-        Armor types supported:
-            - iron
-            - gold
-            - diamond
-            - netherite
-
-        Color reference:
-            Iron: https://minecraft.fandom.com/wiki/Armor#Iron_Armor
-            Gold: https://minecraft.fandom.com/wiki/Armor#Golden_Armor
-            Diamond: https://minecraft.fandom.com/wiki/Armor#Diamond_Armor
-            Netherite: https://minecraft.fandom.com/wiki/Armor#Netherite_Armor
-
-        Reference the table in the link above to verify the color palette.
-
-        Only OUTER_UV regions are written; everything else stays transparent.
-        """
+        """Return a 64×64 RGBA starter armor overlay with vanilla-like piece shapes."""
         from minepainter.skin_constants import OUTER_UV
+
         arr = np.zeros((64, 64, 4), dtype=np.uint8)
 
-        # Define armor palettes
         armor_palettes = {
             "iron": {
-                "BORDER":    (183, 183, 183, 255),   # B7B7B7 — shadow / edge
-                "MID":       (194, 194, 194, 255),   # C2C2C2 — primary face color
-                "LIGHT":     (209, 209, 209, 255),   # D1D1D1 — mid-high face
-                "HIGHLIGHT": (229, 229, 229, 255),   # E5E5E5 — highlight edge
-                "SPECULAR":  (255, 255, 255, 255)   # FFFFFF  — specular dot
+                "border": (122, 122, 122, 255),
+                "mid": (176, 176, 176, 255),
+                "light": (206, 206, 206, 255),
+                "highlight": (238, 238, 238, 255),
+                "spec": (255, 255, 255, 255),
             },
             "gold": {
-                "BORDER":    (199, 143, 63, 255),   # C78F3F — shadow / edge
-                "MID":       (231, 175, 95, 255),   # E7AF5F — primary face color
-                "LIGHT":     (255, 207, 127, 255),   # FFCD7F — mid-high face
-                "HIGHLIGHT": (255, 239, 159, 255),   # FFEF9F — highlight edge
-                "SPECULAR":  (255, 255, 255, 255)   # FFFFFF  — specular dot
+                "border": (128, 92, 38, 255),
+                "mid": (207, 153, 58, 255),
+                "light": (233, 182, 86, 255),
+                "highlight": (248, 212, 125, 255),
+                "spec": (255, 255, 255, 255),
             },
-           "diamond": {
-                "BORDER":    (71, 215, 215, 255),   # 47D7D7 — shadow / edge
-                "MID":       (103, 247, 247, 255),   # 67F7F7 — primary face color
-                "LIGHT":     (135, 255, 255, 255),   # 87FFFF — mid-high face
-                "HIGHLIGHT": (167, 255, 255, 255),   # A7FFFF — highlight edge
-                "SPECULAR":  (255, 255, 255, 255)   # FFFFFF  — specular dot
+            "diamond": {
+                "border": (51, 120, 120, 255),
+                "mid": (89, 196, 196, 255),
+                "light": (121, 224, 224, 255),
+                "highlight": (176, 246, 246, 255),
+                "spec": (255, 255, 255, 255),
+                "accent": (34, 84, 84, 255),
+                "accent_light": (208, 255, 255, 255),
             },
             "netherite": {
-                "BORDER":    (47, 47, 47, 255),   # 2F2F2F — shadow / edge
-                "MID":       (79, 79, 79, 255),   # 4F4F4F — primary face color
-                "LIGHT":     (111, 111, 111, 255),   # 6F6F6F — mid-high face
-                "HIGHLIGHT": (143, 143, 143, 255),   # 8F8F8F — highlight edge
-        SPECULAR  = (255, 255, 255, 255)   # #FFFFFF  — specular dot
+                "border": (42, 42, 46, 255),
+                "mid": (72, 72, 78, 255),
+                "light": (102, 102, 110, 255),
+                "highlight": (140, 140, 150, 255),
+                "spec": (255, 255, 255, 255),
+            },
+        }
+        palette = armor_palettes.get(armor_type.lower(), armor_palettes["iron"])
+        accent = palette.get("accent", palette["border"])
+        accent_light = palette.get("accent_light", palette["highlight"])
 
-        def _paint_face(px: int, py: int, pw: int, ph: int) -> None:
-            """Fill one UV face rectangle with iron-armor shading."""
-            if pw < 1 or ph < 1:
+        def _paint_masked_face(
+            px: int,
+            py: int,
+            pw: int,
+            ph: int,
+            include_pixel,
+            *,
+            boots_band: bool = False,
+        ) -> None:
+            for ly in range(ph):
+                for lx in range(pw):
+                    if not include_pixel(lx, ly, pw, ph):
+                        continue
+
+                    edge = lx == 0 or ly == 0 or lx == pw - 1 or ly == ph - 1
+                    near_top_left = lx <= 1 and ly <= 1
+                    inner = (lx > 0 and ly > 0 and lx < pw - 1 and ly < ph - 1)
+
+                    color = palette["mid"]
+                    if edge:
+                        color = palette["border"]
+                    if inner:
+                        color = palette["light"]
+                    if near_top_left and inner:
+                        color = palette["highlight"]
+                    if lx == 1 and ly == 1 and pw > 2 and ph > 2:
+                        color = palette["spec"]
+
+                    # Darker bottom band on lower legs to suggest boots.
+                    if boots_band and ly >= ph - 4:
+                        r, g, b, a = color
+                        color = (max(0, r - 22), max(0, g - 22), max(0, b - 22), a)
+
+                    arr[py + ly, px + lx] = color
+
+        def _set_local(px: int, py: int, pw: int, ph: int, lx: int, ly: int, color) -> None:
+            if 0 <= lx < pw and 0 <= ly < ph:
+                # Keep detail strokes inside already-visible armor pixels.
+                if arr[py + ly, px + lx, 3] == 0:
+                    return
+                arr[py + ly, px + lx] = color
+
+        def _hline(px: int, py: int, pw: int, ph: int, x0: int, x1: int, y: int, color) -> None:
+            for lx in range(max(0, x0), min(pw, x1 + 1)):
+                _set_local(px, py, pw, ph, lx, y, color)
+
+        def _vline(px: int, py: int, pw: int, ph: int, x: int, y0: int, y1: int, color) -> None:
+            for ly in range(max(0, y0), min(ph, y1 + 1)):
+                _set_local(px, py, pw, ph, x, ly, color)
+
+        def _diamond_gem(px: int, py: int, pw: int, ph: int) -> None:
+            cx = pw // 2
+            cy = max(2, ph // 3)
+            size = max(1, min(pw, ph) // 4)
+            for dy in range(-size, size + 1):
+                span = size - abs(dy)
+                for dx in range(-span, span + 1):
+                    color = accent_light if (dx == 0 and dy <= 0) else palette["highlight"]
+                    _set_local(px, py, pw, ph, cx + dx, cy + dy, color)
+            _set_local(px, py, pw, ph, cx, cy, palette["spec"])
+
+        def _apply_diamond_helmet_front_template(px: int, py: int, pw: int, ph: int) -> None:
+            # Exact helmet-front silhouette/color template (8x8 reference), scaled.
+            D = palette["border"]
+            M = palette["mid"]
+            L = palette["light"]
+            S = palette["spec"]
+            A = accent
+            T = (0, 0, 0, 0)
+            template = [
+                [D, D, D, D, D, D, D, D],
+                [D, S, L, L, L, L, S, D],
+                [D, M, M, M, M, M, M, D],
+                [D, T, T, M, M, T, T, D],
+                [T, T, T, M, M, T, T, T],
+                [T, T, T, T, T, T, T, T],
+                [T, T, T, T, T, T, T, T],
+                [T, T, T, T, T, T, T, T],
+            ]
+            for ly in range(ph):
+                gy = min(7, int(ly * 8 / max(1, ph)))
+                for lx in range(pw):
+                    gx = min(7, int(lx * 8 / max(1, pw)))
+                    arr[py + ly, px + lx] = template[gy][gx]
+
+        def _paint_diamond_helmet_face(face_name: str, px: int, py: int, pw: int, ph: int) -> None:
+            # Explicit pixel templates (8x8 reference) matched to the provided
+            # helmet screenshots (shape + cutouts), then scaled to face size.
+            def _lerp(ca: tuple[int, int, int, int], cb: tuple[int, int, int, int], t: float) -> tuple[int, int, int, int]:
+                t = max(0.0, min(1.0, t))
+                return (
+                    int(ca[0] * (1.0 - t) + cb[0] * t),
+                    int(ca[1] * (1.0 - t) + cb[1] * t),
+                    int(ca[2] * (1.0 - t) + cb[2] * t),
+                    255,
+                )
+
+            # Build diamond-cyan ramps from the active palette.
+            C0 = _lerp(palette["light"], palette["highlight"], 0.90)  # brightest
+            C1 = _lerp(palette["light"], palette["highlight"], 0.45)
+            C2 = _lerp(palette["mid"], palette["light"], 0.60)
+            C3 = _lerp(palette["mid"], palette["light"], 0.25)
+            C4 = _lerp(palette["border"], palette["mid"], 0.20)
+            C5 = palette["border"]
+            T = (0, 0, 0, 0)
+
+            templates: dict[str, list[list[tuple[int, int, int, int]]]] = {
+                "front": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C0, C1, C1, C1, C1, C0, C5],
+                    [C5, C3, C3, C1, C1, C3, C3, C5],
+                    [C5,  T,  T, C0, C2,  T,  T, C5],
+                    [T ,  T,  T, C3, C3,  T,  T,  T],
+                    [T ,  T,  T,  T,  T,  T,  T,  T],
+                    [T,   T,  T,  T,  T,  T,  T, T ],
+                    [T,  T,  T,  T,  T,  T,  T,  T ],
+                ],
+                "left": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C0, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C3, C2, C2, C5],
+                    [C5, C2, C3, C3, C5, C5, C5, C5],
+                    [C5, C5, C5, C5,  T,  T,  T,  T],
+                    [T ,  T,  T,  T,  T, T,  T,  T ],
+                    [T ,  T,  T,  T, T,  T,  T,  T ],
+                    [T ,  T,  T, T,  T,  T,  T,  T ],
+                ],
+                "right": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C1, C1, C1, C1, C1, C0, C5],
+                    [C5, C2, C2, C3, C1, C1, C1, C5],
+                    [C5, C5, C5, C5, C3, C3, C2, C5],
+                    [T ,  T,  T,  T, C5, C5, C5, C5],
+                    [T,  T,  T,   T,  T,  T,  T,  T],
+                    [T,  T,  T,  T,   T,  T,  T,  T],
+                    [T,  T,  T,  T,  T,   T,  T,  T],
+                ],
+                "top": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C1, C1, C1, C1, C1, C1, C5],
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                ],  
+                "back": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C5, C5, C3, C3, C5, C5, C5],
+                    [ T,  T, C5, C5, C5, C5,  T,  T],
+                    [ T,  T,  T,  T,  T,  T, T,  T ],
+                ],
+                "bottom": [
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                ],
+            }
+
+            template = templates.get(face_name)
+            if template is None:
+                return
+            for ly in range(ph):
+                gy = min(7, int(ly * 8 / max(1, ph)))
+                for lx in range(pw):
+                    gx = min(7, int(lx * 8 / max(1, pw)))
+                    arr[py + ly, px + lx] = template[gy][gx]
+
+        def _paint_diamond_chestplate_face(face_name: str, px: int, py: int, pw: int, ph: int) -> None:
+            # Fixed chestplate templates using native proportions:
+            # - front/back: 8x11
+            # - left/right: 4x11
+            # - top/bottom: 8x4
+            def _lerp(ca: tuple[int, int, int, int], cb: tuple[int, int, int, int], t: float) -> tuple[int, int, int, int]:
+                t = max(0.0, min(1.0, t))
+                return (
+                    int(ca[0] * (1.0 - t) + cb[0] * t),
+                    int(ca[1] * (1.0 - t) + cb[1] * t),
+                    int(ca[2] * (1.0 - t) + cb[2] * t),
+                    255,
+                )
+
+            C0 = _lerp(palette["light"], palette["highlight"], 0.75)
+            C1 = _lerp(palette["light"], palette["highlight"], 0.45)
+            C2 = _lerp(palette["mid"], palette["light"], 0.60)
+            C3 = _lerp(palette["mid"], palette["light"], 0.25)
+            C5 = palette["border"]
+            T = (0, 0, 0, 0)
+
+            templates: dict[str, list[list[tuple[int, int, int, int]]]] = {
+                "front": [
+                    [C5, C5,  T,  T,  T,  T, C5, C5],
+                    [C5, C2, C5,  T,  T, C5, C2, C5],
+                    [C5, C0, C2, C5, C5, C0, C2, C5],
+                    [C5, C0, C2, C1, C1, C2, C2, C5],
+                    [C5, C2, C2, C1, C1, C2, C2, C5],
+                    [C5, C2, C2, C2, C2, C2, C2, C5],
+                    [C5, C2, C2, C2, C2, C2, C2, C5],
+                    [C5, C2, C2, C2, C2, C2, C2, C5],
+                    [C5, C2, C2, C2, C2, C2, C2, C5],
+                    [ T, C5, C2, C2, C2, C2, C5,  T],
+                    [ T,  T, C5, C5, C5, C5,  T,  T],
+                ],
+                "back": [
+                    [C5, C5, C5, C5, C5, C5, C5, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [C5, C3, C3, C3, C3, C3, C3, C5],
+                    [ T, C5, C5, C5, C5, C5, C5,  T],
+                    [ T,  T,  T,  T,  T,  T,  T,  T],
+                ],
+                "left": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [ T,  T,  T,  T],
+                    [ T,  T,  T,  T],
+                ],
+                "right": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [ T,  T,  T,  T],
+                    [ T,  T,  T,  T],
+                ],
+                "top": [
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                ],
+                "bottom": [
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                    [T, T, T, T, T, T, T, T],
+                ],
+            }
+
+            template = templates.get(face_name)
+            if template is None:
+                return
+            th = len(template)
+            tw = len(template[0]) if th > 0 else 0
+            if th == 0 or tw == 0:
                 return
 
-            # 1. Flood fill with mid-tone
-            arr[py:py + ph, px:px + pw] = MID
+            # Preserve intended template height (e.g. 11px chest on 12px UV face)
+            # by padding extra rows at the top with transparency instead of stretching.
+            pad_top = max(0, ph - th)
+            for ly in range(ph):
+                if ly < pad_top:
+                    for lx in range(pw):
+                        arr[py + ly, px + lx] = T
+                    continue
+                local_y = ly - pad_top
+                gy = min(th - 1, int(local_y * th / max(1, ph - pad_top)))
+                for lx in range(pw):
+                    gx = min(tw - 1, int(lx * tw / max(1, pw)))
+                    arr[py + ly, px + lx] = template[gy][gx]
 
-            # 2. Dark 1-px border on all four edges
-            arr[py,           px:px + pw] = BORDER   # top row
-            arr[py + ph - 1,  px:px + pw] = BORDER   # bottom row
-            arr[py:py + ph,   px]          = BORDER   # left col
-            arr[py:py + ph,   px + pw - 1] = BORDER   # right col
+        def _paint_diamond_arm_face(part: str, face_name: str, px: int, py: int, pw: int, ph: int) -> None:
+            # Fixed arm templates using native arm proportions:
+            # - side faces: 4x12
+            # - caps: 4x4
+            # Separate sets for right and left arms.
+            def _lerp(ca: tuple[int, int, int, int], cb: tuple[int, int, int, int], t: float) -> tuple[int, int, int, int]:
+                t = max(0.0, min(1.0, t))
+                return (
+                    int(ca[0] * (1.0 - t) + cb[0] * t),
+                    int(ca[1] * (1.0 - t) + cb[1] * t),
+                    int(ca[2] * (1.0 - t) + cb[2] * t),
+                    255,
+                )
 
-            # 3. For faces wider/taller than 3px, lighten the interior slightly
-            if pw > 3 and ph > 3:
-                arr[py + 1:py + ph - 1, px + 1:px + pw - 1] = LIGHT
+            C0 = _lerp(palette["light"], palette["highlight"], 0.75)
+            C1 = _lerp(palette["light"], palette["highlight"], 0.45)
+            C2 = _lerp(palette["mid"], palette["light"], 0.60)
+            C3 = _lerp(palette["mid"], palette["light"], 0.25)
+            C2 = _lerp(palette["mid"], palette["light"], 0.45)
+            C5 = _lerp(palette["border"], palette["mid"], 0.25)
+            B0 = _lerp(palette["border"], palette["mid"], 0.15)
+            B1 = palette["border"]
+            C5 = palette["border"]
+            T = (0, 0, 0, 0)
 
-            # 4. Highlight: 1-px line just inside the top and left border
-            if ph > 2:
-                arr[py + 1, px + 1:px + pw - 1] = HIGHLIGHT  # inner top
-            if pw > 2:
-                arr[py + 1:py + ph - 1, px + 1] = HIGHLIGHT  # inner left
+            templates_by_part: dict[str, dict[str, list[list[tuple[int, int, int, int]]]]] = {
+                "r_arm": {
+                    "front": [
+                        [C5, C5, C5, C5],
+                        [C5, C0, C2, C5],
+                        [C5, C2, C2, C5],
+                        [ T,  T, C2, C5],
+                        [T,  T, C2,  C5],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "back": [
+                        [C5, C5, C5, C5],
+                        [C5, C3, C3, C5],
+                        [C5, C3, C3, C5],
+                        [C5, C3,  T,  T],
+                        [C5, C3, T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "left": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [T,  T , T , T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "right": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C5, C5, C5],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "top": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C1, C5],
+                        [C5, C5, C5, C5],
+                    ],
+                    "bottom": [
+                        [T, T, T, T],
+                        [T, T, T, T],
+                        [T, T, T, T],
+                        [T, T, T, T],
+                    ],
+                },
+                "l_arm": {
+                    "front": [
+                        [C5, C5, C5, C5],
+                        [C5, C0, C2, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2,  T, T ],
+                        [C5, C2,  T, T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "back": [
+                        [C5, C5, C5, C5],
+                        [C5, C3, C3, C5],
+                        [C5, C3, C3, C5],
+                        [T ,  T, C3, C5],
+                        [T,  T,  C3, C5],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "left": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "right": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C2, C5],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                        [T,  T,  T,  T ],
+                    ],
+                    "top": [
+                        [C5, C5, C5, C5],
+                        [C5, C2, C2, C5],
+                        [C5, C2, C1, C5],
+                        [C5, C5, C5, C5],
+                    ],
+                    "bottom": [
+                        [T, T, T, T],
+                        [T, T, T, T],
+                        [T, T, T, T],
+                        [T, T, T, T],
+                    ],
+                },
+            }
 
-            # 5. Single specular dot at the inner top-left corner
-            if pw > 2 and ph > 2:
-                arr[py + 1, px + 1] = SPECULAR
+            template = templates_by_part.get(part, {}).get(face_name)
+            if template is None:
+                return
+            th = len(template)
+            tw = len(template[0]) if th > 0 else 0
+            if th == 0 or tw == 0:
+                return
+            for ly in range(ph):
+                gy = min(th - 1, int(ly * th / max(1, ph)))
+                for lx in range(pw):
+                    gx = min(tw - 1, int(lx * tw / max(1, pw)))
+                    arr[py + ly, px + lx] = template[gy][gx]
 
-        for part_uv in OUTER_UV.values():
-            for (px, py, pw, ph) in part_uv.values():
-                _paint_face(px, py, pw, ph)
+        def _paint_diamond_leg_face(part: str, face_name: str, px: int, py: int, pw: int, ph: int) -> None:
+            # Fixed leg templates using native leg proportions:
+            # - side faces: 4x12
+            # - caps: 4x4
+            # with separate regions for leggings (upper) and boots (lower).
+            def _lerp(ca: tuple[int, int, int, int], cb: tuple[int, int, int, int], t: float) -> tuple[int, int, int, int]:
+                t = max(0.0, min(1.0, t))
+                return (
+                    int(ca[0] * (1.0 - t) + cb[0] * t),
+                    int(ca[1] * (1.0 - t) + cb[1] * t),
+                    int(ca[2] * (1.0 - t) + cb[2] * t),
+                    255,
+                )
+
+            L0 = _lerp(palette["light"], palette["highlight"], 0.80)  # leggings highlight
+            C2 = _lerp(palette["mid"], palette["light"], 0.60)        # leggings base
+            B1 = _lerp(palette["border"], palette["mid"], 0.25)       # leggings dark edge
+            B0 = _lerp(palette["border"], palette["mid"], 0.15)       # boots base darker
+            C5 = palette["border"]                                     # boots darkest
+            T = (0, 0, 0, 0)
+
+            # Full explicit leg templates (4x12 sides, 4x4 caps),
+            # with bottom 4 rows as boots.
+            r_leg_faces = {
+                "front": [
+                    [C5, C5, C5, C5],
+                    [C5, L0, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "back": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "left": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "right": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "top": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, L0, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "bottom": [
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                ],
+            }
+            l_leg_faces = {
+                "front": [
+                    [C5, C5, C5, C5],
+                    [C5, L0, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "back": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "left": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "right": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "top": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, L0, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "bottom": [
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                ],
+            }
+            templates_by_part: dict[str, dict[str, list[list[tuple[int, int, int, int]]]]] = {
+                "r_leg": r_leg_faces,
+                "l_leg": l_leg_faces,
+            }
+
+            # Explicit boot templates (kept separate for editing; not wired into leg templates).
+            r_boot_faces = {
+                "front": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "back": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "left": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "right": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "top": [
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                ],
+                "bottom": [
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                ],
+            }
+            l_boot_faces = {
+                "front": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "back": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "left": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "right": [
+                    [C5, C5, C5, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C2, C2, C5],
+                    [C5, C5, C5, C5],
+                ],
+                "top": [
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                    [T,  T,  T,  T ],
+                ],
+                "bottom": [
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                    [C5, C5, C5, C5],
+                ],
+            }
+
+            template = templates_by_part.get(part, {}).get(face_name)
+            if template is None:
+                return
+            th = len(template)
+            tw = len(template[0]) if th > 0 else 0
+            if th == 0 or tw == 0:
+                return
+            for ly in range(ph):
+                gy = min(th - 1, int(ly * th / max(1, ph)))
+                for lx in range(pw):
+                    gx = min(tw - 1, int(lx * tw / max(1, pw)))
+                    arr[py + ly, px + lx] = template[gy][gx]
+
+        def _apply_diamond_helmet_details(face_name: str, px: int, py: int, pw: int, ph: int) -> None:
+            if face_name == "front":
+                _apply_diamond_helmet_front_template(px, py, pw, ph)
+            elif face_name in ("left", "right"):
+                # Dark front seam on cheek plates.
+                _vline(px, py, pw, ph, 1, 1, ph - 3, accent)
+
+        def _full(_x: int, _y: int, _w: int, _h: int) -> bool:
+            return True
+
+        def _arm_plate(_x: int, y: int, _w: int, h: int) -> bool:
+            return y < max(1, h // 2)
+
+        def _diamond_piece_mask(part: str, face_name: str, lx: int, ly: int, pw: int, ph: int) -> bool:
+            # Closer to real Minecraft full armor set silhouettes.
+            if part == "head":
+                if face_name == "front":
+                    return True
+                if face_name in ("left", "right"):
+                    gx = int(lx * 8 / max(1, pw))
+                    gy = int(ly * 8 / max(1, ph))
+                    if gy <= 4:
+                        return True
+                    if gy >= 6:
+                        return gx <= 3
+                    return gx <= 5
+                if face_name == "bottom":
+                    return False
+                return True
+
+            # Chestplate: full torso, open underside.
+            if part == "body":
+                return face_name != "bottom"
+
+            # Chestplate shoulders: only upper arm band.
+            if part in ("r_arm", "l_arm"):
+                if face_name in ("front", "back", "left", "right"):
+                    return ly <= max(2, ph // 3)
+                if face_name == "top":
+                    return True
+                if face_name == "bottom":
+                    return False
+                return True
+
+            # Leggings (upper legs) + boots (lower legs), small knee gap.
+            if part in ("r_leg", "l_leg"):
+                if face_name in ("front", "back", "left", "right"):
+                    upper = ly <= max(4, ph // 2)
+                    lower = ly >= ph - 3
+                    return upper or lower
+                if face_name == "top":
+                    return True
+                if face_name == "bottom":
+                    return True
+                return True
+
+            return True
+
+        for part, part_uv in OUTER_UV.items():
+            for face_name, (px, py, pw, ph) in part_uv.items():
+                include = _full
+                boots_band = False
+
+                # Chestplates only cover shoulder/upper-arm area.
+                if part in ("r_arm", "l_arm") and face_name in ("front", "back", "left", "right"):
+                    include = _arm_plate
+
+                # Keep full caps for arms and all head/body faces.
+                # Legs are full, but add a dark lower band to suggest boots.
+                if part in ("r_leg", "l_leg"):
+                    boots_band = True
+
+                if armor_type.lower() == "diamond":
+                    include = lambda lx, ly, w, h, p=part, f=face_name: _diamond_piece_mask(p, f, lx, ly, w, h)
+
+                if armor_type.lower() == "diamond" and part == "head":
+                    _paint_diamond_helmet_face(face_name, px, py, pw, ph)
+                    continue
+                if armor_type.lower() == "diamond" and part == "body":
+                    _paint_diamond_chestplate_face(face_name, px, py, pw, ph)
+                    continue
+                if armor_type.lower() == "diamond" and part in ("r_arm", "l_arm"):
+                    _paint_diamond_arm_face(part, face_name, px, py, pw, ph)
+                    continue
+                if armor_type.lower() == "diamond" and part in ("r_leg", "l_leg"):
+                    _paint_diamond_leg_face(part, face_name, px, py, pw, ph)
+                    continue
+
+                _paint_masked_face(px, py, pw, ph, include, boots_band=boots_band)
+                if armor_type.lower() == "diamond" and part == "head":
+                    _apply_diamond_helmet_details(face_name, px, py, pw, ph)
 
         return arr
 

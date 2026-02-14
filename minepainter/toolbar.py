@@ -1,7 +1,7 @@
 """
 AppToolBar: the main window's top toolbar.
 
-Actions: New, Open, Save, Save As, separator,
+Actions: New, Open, Save, separator,
          Toggle base skin visibility (checkable),
          Toggle armor overlay visibility (checkable),
          separator, Skin type combo (Steve / Alex).
@@ -61,11 +61,6 @@ class AppToolBar(QToolBar):
         self._act_save.setShortcut("Ctrl+S")
         self._act_save.triggered.connect(self.save_requested)
         self.addAction(self._act_save)
-
-        self._act_save_as = QAction("Save As…", self)
-        self._act_save_as.setShortcut("Ctrl+Shift+S")
-        self._act_save_as.triggered.connect(self.save_as_requested)
-        self.addAction(self._act_save_as)
 
         self.addSeparator()
 

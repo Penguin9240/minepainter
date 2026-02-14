@@ -113,10 +113,10 @@ OUTER_UV: dict[str, dict[str, tuple[int, int, int, int]]] = {
     "l_leg": {
         "top":    ( 4, 48,  4,  4),
         "bottom": ( 8, 48,  4,  4),
-        "right":  ( 0, 48,  4, 12),  # left leg outer shares row with l_leg base in legacy
-        "front":  ( 4, 48,  4, 12),
-        "left":   ( 8, 48,  4, 12),
-        "back":   (12, 48,  4, 12),
+        "right":  ( 0, 52,  4, 12),
+        "front":  ( 4, 52,  4, 12),
+        "left":   ( 8, 52,  4, 12),
+        "back":   (12, 52,  4, 12),
     },
 }
 
@@ -133,13 +133,15 @@ BODY_DIMENSIONS: dict[str, tuple[int, int, int]] = {
     "l_arm": (4, 12, 4),
     "r_leg": (4, 12, 4),
     "l_leg": (4, 12, 4),
-    # Outer (armor) layer — inflated by 1 unit total (0.5 on each side)
+    # Outer (armor) layer — vanilla second layer is +0.5 total per axis
+    # Helmet/arms/leggings: 0.5px off body => +1.0 total per axis.
     "head_outer":  (9, 9, 9),
-    "body_outer":  (9, 13, 5),
     "r_arm_outer": (5, 13, 5),
     "l_arm_outer": (5, 13, 5),
     "r_leg_outer": (5, 13, 5),
     "l_leg_outer": (5, 13, 5),
+    # Chestplate: 1.0px off body => +2.0 total per axis.
+    "body_outer":  (10, 14, 6),
 }
 
 # Alex-variant arm widths (3 instead of 4)
@@ -147,6 +149,7 @@ ALEX_DIMENSIONS: dict[str, tuple[int, int, int]] = {
     **BODY_DIMENSIONS,
     "r_arm": (3, 12, 4),
     "l_arm": (3, 12, 4),
+    # Alex arm overlay still keeps 0.5px shell relative to 3x12x4 base arm.
     "r_arm_outer": (4, 13, 5),
     "l_arm_outer": (4, 13, 5),
 }

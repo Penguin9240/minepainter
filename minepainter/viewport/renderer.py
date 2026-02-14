@@ -14,7 +14,14 @@ import numpy as np
 from OpenGL import GL
 
 from minepainter.viewport.shaders import VERTEX_SRC, FRAGMENT_SRC
-from minepainter.viewport.mesh_builder import VERTEX_STRIDE, POSITION_OFFSET, UV_OFFSET, NORMAL_OFFSET, STAND_PARTS
+from minepainter.viewport.mesh_builder import (
+    VERTEX_STRIDE,
+    POSITION_OFFSET,
+    UV_OFFSET,
+    NORMAL_OFFSET,
+    STAND_PARTS,
+    BOOT_OUTER_PARTS,
+)
 from minepainter.skin_constants import BASE_PARTS, OUTER_PARTS
 
 
@@ -60,6 +67,8 @@ class ModelRenderer:
         self._show_base: bool = True
         self._show_armor: bool = True
         self._show_stand: bool = False   # only True when editing armor layer
+        self._visible_base_parts: set[str] = set(BASE_PARTS)
+        self._visible_armor_parts: set[str] = set([*OUTER_PARTS, *BOOT_OUTER_PARTS])
 
     # ------------------------------------------------------------------
     # Initialisation (call once, from initializeGL)
@@ -180,6 +189,43 @@ class ModelRenderer:
         """Show or hide the armor stand rod/base geometry."""
         self._show_stand = show
 
+    def set_base_part_visible(self, group: str, visible: bool) -> None:
+        mapping = {
+            "head": ["head"],
+            "body": ["body"],
+            "r_arm": ["r_arm"],
+            "l_arm": ["l_arm"],
+            "r_leg": ["r_leg"],
+            "l_leg": ["l_leg"],
+            "arms": ["r_arm", "l_arm"],
+            "legs": ["r_leg", "l_leg"],
+        }
+        for part in mapping.get(group, []):
+            if visible:
+                self._visible_base_parts.add(part)
+            else:
+                self._visible_base_parts.discard(part)
+
+    def set_armor_part_visible(self, group: str, visible: bool) -> None:
+        mapping = {
+            "helmet": ["head_outer"],
+            "chest": ["body_outer"],
+            "arms": ["r_arm_outer", "l_arm_outer"],
+            "legs": ["r_leg_outer", "l_leg_outer"],
+            "boots": [*BOOT_OUTER_PARTS],
+            "r_arm": ["r_arm_outer"],
+            "l_arm": ["l_arm_outer"],
+            "r_leg": ["r_leg_outer"],
+            "l_leg": ["l_leg_outer"],
+            "r_boot": ["r_boot_outer"],
+            "l_boot": ["l_boot_outer"],
+        }
+        for part in mapping.get(group, []):
+            if visible:
+                self._visible_armor_parts.add(part)
+            else:
+                self._visible_armor_parts.discard(part)
+
     # ------------------------------------------------------------------
     # Drawing
     # ------------------------------------------------------------------
@@ -221,14 +267,14 @@ class ModelRenderer:
             GL.glUniform1i(loc_is_base, 1)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self._tex_base)
             for part in BASE_PARTS:
-                if part in self._vaos:
+                if part in self._vaos and part in self._visible_base_parts:
                     self._draw_part(part)
 
         if self._show_armor:
             GL.glUniform1i(loc_is_base, 0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self._tex_armor)
-            for part in OUTER_PARTS:
-                if part in self._vaos:
+            for part in [*OUTER_PARTS, *BOOT_OUTER_PARTS]:
+                if part in self._vaos and part in self._visible_armor_parts:
                     self._draw_part(part)
 
         # Draw the armor stand structure: wooden frame in tan, stone base in grey

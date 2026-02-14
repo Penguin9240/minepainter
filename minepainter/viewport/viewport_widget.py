@@ -17,12 +17,15 @@ from PySide6.QtGui import QMouseEvent, QWheelEvent
 
 from minepainter.document import SkinDocument
 from minepainter.viewport import mesh_builder
-from minepainter.viewport.mesh_builder import build_stand_meshes, build_stand_body_meshes
+from minepainter.viewport.mesh_builder import (
+    build_stand_meshes,
+    build_stand_body_meshes,
+)
 from minepainter.viewport.renderer import ModelRenderer
 from minepainter.viewport.math_utils import look_at, perspective
 from minepainter.viewport.ray_cast import ray_from_screen, hit_mesh
 from minepainter.uv_editor.paint_engine import PaintEngine
-from minepainter.skin_constants import BASE_PARTS, OUTER_PARTS
+from minepainter.skin_constants import BASE_PARTS
 
 
 class ViewportWidget(QOpenGLWidget):
@@ -33,6 +36,26 @@ class ViewportWidget(QOpenGLWidget):
         self.renderer: Optional[ModelRenderer] = None
         self._engine = PaintEngine(document)
         self._show_stand: bool = False   # set True for armor editing mode
+        self._spread_out_mode: bool = False
+        self._pose: str = "stand"
+        self._base_part_visibility: dict[str, bool] = {
+            "head": True,
+            "body": True,
+            "r_arm": True,
+            "l_arm": True,
+            "r_leg": True,
+            "l_leg": True,
+        }
+        self._armor_part_visibility: dict[str, bool] = {
+            "helmet": True,
+            "chest": True,
+            "r_arm": True,
+            "l_arm": True,
+            "r_leg": True,
+            "l_leg": True,
+            "r_boot": True,
+            "l_boot": True,
+        }
 
         # CPU-side mesh data for ray casting (kept in sync with skin_type)
         self._meshes: dict[str, object] = {}
@@ -58,11 +81,21 @@ class ViewportWidget(QOpenGLWidget):
 
     def _build_meshes(self) -> dict:
         """Build all meshes, applying armor-stand arm poses if stand mode is on."""
-        meshes = mesh_builder.build_all_meshes(self.document.skin_type)
+        meshes = mesh_builder.build_all_meshes(
+            self.document.skin_type,
+            spread_out=self._spread_out_mode,
+            pose=self._pose,
+        )
         meshes.update(build_stand_meshes())
         if self._show_stand:
             # Replace outer body meshes with posed (arms-out) versions
-            meshes.update(build_stand_body_meshes(self.document.skin_type))
+            meshes.update(
+                build_stand_body_meshes(
+                    self.document.skin_type,
+                    spread_out=self._spread_out_mode,
+                    pose=self._pose,
+                )
+            )
         return meshes
 
     def initializeGL(self) -> None:
@@ -72,6 +105,10 @@ class ViewportWidget(QOpenGLWidget):
             self.renderer = ModelRenderer()
             self.renderer.initialize(self._meshes)
             self.renderer.set_show_stand(self._show_stand)
+            for group, visible in self._base_part_visibility.items():
+                self.renderer.set_base_part_visible(group, visible)
+            for group, visible in self._armor_part_visibility.items():
+                self.renderer.set_armor_part_visible(group, visible)
 
             # Sync visibility from document (may have been set before GL context existed)
             self.renderer.set_layer_visible("base",  self.document.base_visible)
@@ -187,9 +224,34 @@ class ViewportWidget(QOpenGLWidget):
         # base layer — producing marks in completely wrong texture regions.
         layer = self.tool_state.active_layer
         if layer == "base":
-            parts = BASE_PARTS if self.document.base_visible else []
+            if self.document.base_visible:
+                parts = []
+                for part in BASE_PARTS:
+                    if self._base_part_visibility.get(part, True):
+                        parts.append(part)
+            else:
+                parts = []
         else:
-            parts = OUTER_PARTS if self.document.armor_visible else []
+            if self.document.armor_visible:
+                parts = []
+                if self._armor_part_visibility["helmet"]:
+                    parts.append("head_outer")
+                if self._armor_part_visibility["chest"]:
+                    parts.append("body_outer")
+                if self._armor_part_visibility["r_arm"]:
+                    parts.append("r_arm_outer")
+                if self._armor_part_visibility["l_arm"]:
+                    parts.append("l_arm_outer")
+                if self._armor_part_visibility["r_leg"]:
+                    parts.append("r_leg_outer")
+                if self._armor_part_visibility["l_leg"]:
+                    parts.append("l_leg_outer")
+                if self._armor_part_visibility["r_boot"]:
+                    parts.append("r_boot_outer")
+                if self._armor_part_visibility["l_boot"]:
+                    parts.append("l_boot_outer")
+            else:
+                parts = []
 
         hit = hit_mesh(origin, direction, self._meshes, parts)
         if hit is None:
@@ -284,6 +346,10 @@ class ViewportWidget(QOpenGLWidget):
             self.renderer.cleanup()
             self.renderer.initialize(self._meshes)
             self.renderer.set_show_stand(show)
+            for group, visible in self._base_part_visibility.items():
+                self.renderer.set_base_part_visible(group, visible)
+            for group, visible in self._armor_part_visibility.items():
+                self.renderer.set_armor_part_visible(group, visible)
             self.renderer.upload_texture("base",  self.document.base_image)
             self.renderer.upload_texture("armor", self.document.armor_image)
             self.doneCurrent()
@@ -300,10 +366,72 @@ class ViewportWidget(QOpenGLWidget):
             self.renderer.cleanup()
             self.renderer.initialize(self._meshes)
             self.renderer.set_show_stand(self._show_stand)
+            for group, visible in self._base_part_visibility.items():
+                self.renderer.set_base_part_visible(group, visible)
+            for group, visible in self._armor_part_visibility.items():
+                self.renderer.set_armor_part_visible(group, visible)
             self.renderer.upload_texture("base",  self.document.base_image)
             self.renderer.upload_texture("armor", self.document.armor_image)
             self.doneCurrent()
         self.update()
+
+    def set_armor_part_visible(self, group: str, visible: bool) -> None:
+        aliases = {
+            "arms": ("r_arm", "l_arm"),
+            "legs": ("r_leg", "l_leg"),
+            "boots": ("r_boot", "l_boot"),
+        }
+        if group in aliases:
+            for key in aliases[group]:
+                self._armor_part_visibility[key] = visible
+            if self.renderer is not None:
+                self.renderer.set_armor_part_visible(group, visible)
+            self.update()
+            return
+        if group not in self._armor_part_visibility:
+            return
+        self._armor_part_visibility[group] = visible
+        if self.renderer is not None:
+            self.renderer.set_armor_part_visible(group, visible)
+        self.update()
+
+    def set_base_part_visible(self, group: str, visible: bool) -> None:
+        aliases = {
+            "arms": ("r_arm", "l_arm"),
+            "legs": ("r_leg", "l_leg"),
+        }
+        if group in aliases:
+            for key in aliases[group]:
+                self._base_part_visibility[key] = visible
+            if self.renderer is not None:
+                self.renderer.set_base_part_visible(group, visible)
+            self.update()
+            return
+        if group not in self._base_part_visibility:
+            return
+        self._base_part_visibility[group] = visible
+        if self.renderer is not None:
+            self.renderer.set_base_part_visible(group, visible)
+        self.update()
+
+    def set_spread_out_mode(self, enabled: bool) -> None:
+        if self._spread_out_mode == enabled:
+            return
+        self._spread_out_mode = enabled
+        self._paint_last = None
+        self._paint_last_part = None
+        self._paint_last_face = None
+        self.rebuild_meshes(self.document.skin_type)
+
+    def set_pose(self, pose: str) -> None:
+        pose = (pose or "stand").lower()
+        if pose == self._pose:
+            return
+        self._pose = pose
+        self._paint_last = None
+        self._paint_last_part = None
+        self._paint_last_face = None
+        self.rebuild_meshes(self.document.skin_type)
 
     # ------------------------------------------------------------------
     # Cleanup

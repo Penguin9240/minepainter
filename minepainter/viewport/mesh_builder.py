@@ -25,6 +25,17 @@ from minepainter.skin_constants import (
     ALEX_DIMENSIONS,
 )
 
+BOOT_OUTER_PARTS = ["r_boot_outer", "l_boot_outer"]
+SPREAD_OFFSETS: dict[str, tuple[float, float, float]] = {
+    # "Exploded" layout offsets for easier painting/inspection.
+    "head":  (0.0, 2.0, 0.0),
+    "body":  (0.0, 0.0, 0.0),
+    "r_arm": (2.5, 0.0, 0.0),
+    "l_arm": (-2.5, 0.0, 0.0),
+    "r_leg": (1.2, -1.0, 0.0),
+    "l_leg": (-1.2, -1.0, 0.0),
+}
+
 # Stride in bytes for one vertex
 VERTEX_STRIDE = 8 * 4   # 8 floats × 4 bytes
 POSITION_OFFSET = 0
@@ -218,6 +229,79 @@ def _rotate_vertices_x(verts: np.ndarray, angle_deg: float, pivot: tuple[float, 
     return out
 
 
+def _apply_pose(meshes: dict[str, np.ndarray], pose: str) -> dict[str, np.ndarray]:
+    """Apply a simple Minecraft-style pose to body and armor meshes."""
+    pose = (pose or "stand").lower()
+    # X rotations (forward/back swing), Z rotations (tilt).
+    presets: dict[str, dict[str, dict[str, float]]] = {
+        "stand": {"x": {}, "z": {}},
+        "walk": {
+            "x": {"r_arm": 25.0, "l_arm": -25.0, "r_leg": -25.0, "l_leg": 25.0},
+            "z": {},
+        },
+        "run": {
+            "x": {"r_arm": 55.0, "l_arm": -55.0, "r_leg": -45.0, "l_leg": 45.0, "head": -8.0},
+            "z": {},
+        },
+        "fly": {
+            "x": {"r_arm": 160.0, "l_arm": 160.0, "r_leg": 18.0, "l_leg": 18.0, "head": 12.0},
+            "z": {"r_arm": 6.0, "l_arm": -6.0},
+        },
+    }
+    p = presets.get(pose, presets["stand"])
+    x_angles = p["x"]
+    z_angles = p["z"]
+
+    # Shoulder/hip/neck pivots in model space.
+    pivots: dict[str, tuple[float, float, float]] = {
+        "head": (BODY_POSITIONS["head"][0], 24.0, BODY_POSITIONS["head"][2]),
+        "r_arm": (BODY_POSITIONS["r_arm"][0], 24.0, BODY_POSITIONS["r_arm"][2]),
+        "l_arm": (BODY_POSITIONS["l_arm"][0], 24.0, BODY_POSITIONS["l_arm"][2]),
+        "r_leg": (BODY_POSITIONS["r_leg"][0], 12.0, BODY_POSITIONS["r_leg"][2]),
+        "l_leg": (BODY_POSITIONS["l_leg"][0], 12.0, BODY_POSITIONS["l_leg"][2]),
+        # Boots follow their leg pivots.
+        "r_boot_outer": (BODY_POSITIONS["r_leg"][0], 12.0, BODY_POSITIONS["r_leg"][2]),
+        "l_boot_outer": (BODY_POSITIONS["l_leg"][0], 12.0, BODY_POSITIONS["l_leg"][2]),
+    }
+
+    # Apply to base + outer meshes for each animated part.
+    for part in ("head", "r_arm", "l_arm", "r_leg", "l_leg"):
+        for mesh_name in (part, f"{part}_outer"):
+            if mesh_name not in meshes:
+                continue
+            verts = meshes[mesh_name]
+            if part in x_angles:
+                py, pz = pivots[part][1], pivots[part][2]
+                verts = _rotate_vertices_x(verts, x_angles[part], pivot=(py, pz))
+            if part in z_angles:
+                px, py = pivots[part][0], pivots[part][1]
+                verts = _rotate_vertices_z(verts, z_angles[part], pivot=(px, py))
+            meshes[mesh_name] = verts
+
+    # Rotate boot shells with legs so armor and base stay aligned.
+    for boot, leg in (("r_boot_outer", "r_leg"), ("l_boot_outer", "l_leg")):
+        if boot not in meshes:
+            continue
+        verts = meshes[boot]
+        if leg in x_angles:
+            py, pz = pivots[boot][1], pivots[boot][2]
+            verts = _rotate_vertices_x(verts, x_angles[leg], pivot=(py, pz))
+        if leg in z_angles:
+            px, py = pivots[boot][0], pivots[boot][1]
+            verts = _rotate_vertices_z(verts, z_angles[leg], pivot=(px, py))
+        meshes[boot] = verts
+
+    return meshes
+
+
+def _part_center(part: str, spread_out: bool) -> tuple[float, float, float]:
+    cx, cy, cz = BODY_POSITIONS[part]
+    if spread_out:
+        ox, oy, oz = SPREAD_OFFSETS.get(part, (0.0, 0.0, 0.0))
+        return cx + ox, cy + oy, cz + oz
+    return cx, cy, cz
+
+
 def build_stand_meshes() -> dict[str, np.ndarray]:
     """
     Build the untextured geometry for a Minecraft armor stand.
@@ -273,51 +357,27 @@ def build_stand_meshes() -> dict[str, np.ndarray]:
     return meshes
 
 
-def build_stand_body_meshes(skin_type: str = "steve") -> dict[str, np.ndarray]:
+def build_stand_body_meshes(
+    skin_type: str = "steve",
+    spread_out: bool = False,
+    pose: str = "stand",
+) -> dict[str, np.ndarray]:
     """
-    Build the OUTER (armor) body-part meshes with arm/head poses baked in,
-    matching the Minecraft armor stand appearance:
-      - Right arm rotated ~-40° outward (Z rotation around right shoulder pivot)
-      - Left arm rotated ~+40° outward (Z rotation around left shoulder pivot)
-      - Head tilted ~-12° forward (X rotation around neck pivot)
+    Build OUTER (armor) body-part meshes for armor editor mode.
 
-    Returns a dict with the same outer-part keys as build_all_meshes but with
-    modified vertex positions.
+    Keep the same neutral pose as the base player mesh so the armor reads like
+    in-game worn armor instead of an exaggerated mannequin pose.
     """
     dims = ALEX_DIMENSIONS if skin_type == "alex" else BODY_DIMENSIONS
     meshes: dict[str, np.ndarray] = {}
 
-    # Build non-arm, non-head outer parts normally
-    for part in ("body", "r_leg", "l_leg"):
+    for part in ("head", "body", "r_arm", "l_arm", "r_leg", "l_leg"):
         outer = part + "_outer"
         w, h, d = dims[outer]
-        cx, cy, cz = BODY_POSITIONS[part]
+        cx, cy, cz = _part_center(part, spread_out)
         meshes[outer] = build_cuboid(w, h, d, cx, cy, cz, OUTER_UV[part])
 
-    # Head — build at normal position then tilt forward (rotate around X at neck y=24)
-    hw, hh, hd = dims["head_outer"]
-    hx, hy, hz = BODY_POSITIONS["head"]
-    head_verts = build_cuboid(hw, hh, hd, hx, hy, hz, OUTER_UV["head"])
-    # Neck pivot is at y=24 (top of body), z=0; positive angle tilts chin forward (+Z)
-    head_verts = _rotate_vertices_x(head_verts, +12.0, pivot=(24.0, 0.0))
-    meshes["head_outer"] = head_verts
-
-    # Right arm — shoulder pivot at top of arm (rx, 24).
-    # Positive Z rotation = counter-clockwise from front = arm swings right/outward.
-    rw, rh, rd = dims["r_arm_outer"]
-    rx, ry, rz = BODY_POSITIONS["r_arm"]
-    r_arm_verts = build_cuboid(rw, rh, rd, rx, ry, rz, OUTER_UV["r_arm"])
-    r_arm_verts = _rotate_vertices_z(r_arm_verts, +40.0, pivot=(rx, 24.0))
-    meshes["r_arm_outer"] = r_arm_verts
-
-    # Left arm — negative rotation swings it outward to the left.
-    lw, lh, ld = dims["l_arm_outer"]
-    lx, ly, lz = BODY_POSITIONS["l_arm"]
-    l_arm_verts = build_cuboid(lw, lh, ld, lx, ly, lz, OUTER_UV["l_arm"])
-    l_arm_verts = _rotate_vertices_z(l_arm_verts, -40.0, pivot=(lx, 24.0))
-    meshes["l_arm_outer"] = l_arm_verts
-
-    return meshes
+    return _apply_pose(meshes, pose)
 
 
 # Names of the armor-stand-only mesh parts (wooden frame + stone base)
@@ -332,7 +392,11 @@ STAND_PARTS = [
 ]
 
 
-def build_all_meshes(skin_type: str = "steve") -> dict[str, np.ndarray]:
+def build_all_meshes(
+    skin_type: str = "steve",
+    spread_out: bool = False,
+    pose: str = "stand",
+) -> dict[str, np.ndarray]:
     """
     Build vertex data for all base and outer (armor overlay) body parts.
 
@@ -344,15 +408,36 @@ def build_all_meshes(skin_type: str = "steve") -> dict[str, np.ndarray]:
 
     for part in BASE_PARTS:
         w, h, d = dims[part]
-        cx, cy, cz = BODY_POSITIONS[part]
+        cx, cy, cz = _part_center(part, spread_out)
         uv_faces = BASE_UV[part]
         meshes[part] = build_cuboid(w, h, d, cx, cy, cz, uv_faces)
 
     for outer_part in OUTER_PARTS:
         base = outer_part.replace("_outer", "")
         w, h, d = dims[outer_part]
-        cx, cy, cz = BODY_POSITIONS[base]
+        cx, cy, cz = _part_center(base, spread_out)
         uv_faces = OUTER_UV[base]
         meshes[outer_part] = build_cuboid(w, h, d, cx, cy, cz, uv_faces)
 
-    return meshes
+    # Extra raised boot shells around the lower legs.
+    for leg in ("r_leg", "l_leg"):
+        lx, _, lz = _part_center(leg, spread_out)
+        boot_name = "r_boot_outer" if leg == "r_leg" else "l_boot_outer"
+        # Boots are 1.0px off the leg shell => +2.0 total per axis around 4x4 area.
+        # Lower-leg boot section is 4px tall, so a 1px shell becomes 6px total height.
+        bw, bh, bd = 6.0, 6.0, 6.0
+        by = 2.0
+        if spread_out:
+            by = 0.5
+        leg_uv = OUTER_UV[leg]
+        # Map boots to lower 4 rows of the leg side UV faces.
+        boot_uv = {
+            "right":  (leg_uv["right"][0],  leg_uv["right"][1] + 8, 4, 4),
+            "front":  (leg_uv["front"][0],  leg_uv["front"][1] + 8, 4, 4),
+            "left":   (leg_uv["left"][0],   leg_uv["left"][1] + 8, 4, 4),
+            "back":   (leg_uv["back"][0],   leg_uv["back"][1] + 8, 4, 4),
+            "bottom": leg_uv["bottom"],
+        }
+        meshes[boot_name] = build_cuboid(bw, bh, bd, lx, by, lz, boot_uv)
+
+    return _apply_pose(meshes, pose)
