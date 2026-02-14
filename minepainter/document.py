@@ -7,6 +7,7 @@ tight coupling between the widgets themselves.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -54,8 +55,9 @@ class SkinDocument(QObject):
         self._dirty: bool = False
         self.filepath: Optional[Path] = None
 
-        # Undo stack: list of (layer_name, np.ndarray snapshot) tuples
+        # Undo/redo stacks: list of (layer_name, np.ndarray snapshot) tuples
         self._undo_stack: list[tuple[str, np.ndarray]] = []
+        self._redo_stack: list[tuple[str, np.ndarray]] = []
 
     # ------------------------------------------------------------------
     # Pixel access
@@ -1072,6 +1074,169 @@ class SkinDocument(QObject):
         self.layer_replaced.emit("armor")
         self._mark_dirty()
 
+    @staticmethod
+    def encode_armor_state_text(armor_image: np.ndarray) -> str:
+        """
+        Encode armor image as human-readable JSON with per-area RGBA pixels.
+        """
+        arr = np.asarray(armor_image)
+        if arr.shape != (64, 64, 4):
+            raise ValueError(f"Invalid armor image shape {arr.shape}; expected (64, 64, 4).")
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+        face_map = SkinDocument._armor_state_face_map()
+        payload: dict[str, object] = {
+            "version": 2,
+            "format": "minepainter_armor_state_v2",
+            "width": 64,
+            "height": 64,
+            "areas": {},
+        }
+        areas: dict[str, object] = {}
+        for area_name, faces in face_map.items():
+            area_obj: dict[str, object] = {}
+            for face_name, (x, y, w, h) in faces.items():
+                patch = arr[y:y + h, x:x + w, :]
+                area_obj[face_name] = {
+                    "uv": [x, y, w, h],
+                    "pixels": patch.tolist(),
+                }
+            areas[area_name] = area_obj
+        payload["areas"] = areas
+        return json.dumps(payload, indent=2)
+
+    @staticmethod
+    def decode_armor_state_text(state_text: str) -> np.ndarray:
+        """
+        Decode armor state from JSON text into a 64x64x4 uint8 image.
+        """
+        try:
+            parsed = json.loads(state_text)
+        except Exception as e:
+            raise ValueError(f"Armor state must be valid JSON: {e}") from e
+
+        if not isinstance(parsed, dict):
+            raise ValueError("Armor state JSON must be an object.")
+
+        version = int(parsed.get("version", 0))
+        fmt = str(parsed.get("format", "")).strip()
+        w = int(parsed.get("width", 0))
+        h = int(parsed.get("height", 0))
+        if version != 2 or fmt != "minepainter_armor_state_v2":
+            raise ValueError(f"Unsupported armor state schema: version={version}, format={fmt!r}")
+        if (w, h) != (64, 64):
+            raise ValueError(
+                f"Invalid armor state dimensions: {(w, h)}; expected (64, 64)."
+            )
+
+        areas = parsed.get("areas")
+        if not isinstance(areas, dict):
+            raise ValueError("Armor state JSON is missing 'areas' object.")
+
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        face_map = SkinDocument._armor_state_face_map()
+        for area_name, faces in face_map.items():
+            area_obj = areas.get(area_name)
+            if not isinstance(area_obj, dict):
+                raise ValueError(f"Armor state is missing area '{area_name}'.")
+            for face_name, (x, y, w_face, h_face) in faces.items():
+                face_obj = area_obj.get(face_name)
+                if not isinstance(face_obj, dict):
+                    raise ValueError(f"Area '{area_name}' is missing face '{face_name}'.")
+
+                uv = face_obj.get("uv")
+                expected_uv = [x, y, w_face, h_face]
+                if uv != expected_uv:
+                    raise ValueError(
+                        f"Area '{area_name}' face '{face_name}' has uv {uv!r}; "
+                        f"expected {expected_uv!r}."
+                    )
+
+                pixels = face_obj.get("pixels")
+                if not isinstance(pixels, list):
+                    raise ValueError(f"Area '{area_name}' face '{face_name}' pixels must be a list.")
+                patch = np.array(pixels, dtype=np.int16)
+                expected = (h_face, w_face, 4)
+                if tuple(patch.shape) != expected:
+                    raise ValueError(
+                        f"Area '{area_name}' face '{face_name}' has shape {tuple(patch.shape)}; "
+                        f"expected {expected}."
+                    )
+                if patch.min() < 0 or patch.max() > 255:
+                    raise ValueError(f"Area '{area_name}' face '{face_name}' RGBA values must be 0..255.")
+                arr[y:y + h_face, x:x + w_face, :] = patch.astype(np.uint8)
+        return arr
+
+    @staticmethod
+    def _armor_state_face_map() -> dict[str, dict[str, tuple[int, int, int, int]]]:
+        """
+        Human-readable armor areas mapped to 64x64 armor-grid UV rectangles.
+        """
+        from minepainter.skin_constants import BASE_UV
+
+        head = BASE_UV["head"]
+        body = BASE_UV["body"]
+        arm = BASE_UV["r_arm"]  # shared arm template
+        leg = BASE_UV["r_leg"]  # shared leg template
+
+        return {
+            "helmet": {
+                "top": head["top"],
+                "bottom": head["bottom"],
+                "right": head["right"],
+                "front": head["front"],
+                "left": head["left"],
+                "back": head["back"],
+            },
+            "chestplate": {
+                "top": body["top"],
+                "bottom": body["bottom"],
+                "right": body["right"],
+                "front": body["front"],
+                "left": body["left"],
+                "back": body["back"],
+            },
+            "arms": {
+                "top": arm["top"],
+                "bottom": arm["bottom"],
+                "right": arm["right"],
+                "front": arm["front"],
+                "left": arm["left"],
+                "back": arm["back"],
+            },
+            "leggings": {
+                "top": (leg["top"][0], leg["top"][1] + 32, leg["top"][2], leg["top"][3]),
+                "right": (leg["right"][0], leg["right"][1] + 32, leg["right"][2], 8),
+                "front": (leg["front"][0], leg["front"][1] + 32, leg["front"][2], 8),
+                "left": (leg["left"][0], leg["left"][1] + 32, leg["left"][2], 8),
+                "back": (leg["back"][0], leg["back"][1] + 32, leg["back"][2], 8),
+            },
+            "boots": {
+                "bottom": leg["bottom"],
+                "right": (leg["right"][0], leg["right"][1] + 8, leg["right"][2], 4),
+                "front": (leg["front"][0], leg["front"][1] + 8, leg["front"][2], 4),
+                "left": (leg["left"][0], leg["left"][1] + 8, leg["left"][2], 4),
+                "back": (leg["back"][0], leg["back"][1] + 8, leg["back"][2], 4),
+            },
+        }
+
+    def get_armor_state_text(self) -> str:
+        """Return text-encoded representation of current armor state."""
+        return self.encode_armor_state_text(self.armor_image)
+
+    def apply_armor_state_text(self, state_text: str, *, push_undo: bool = True) -> None:
+        """
+        Decode and apply armor state. Emits layer_replaced('armor').
+        If push_undo is True, AI updates can be undone with Ctrl+Z.
+        """
+        new_img = self.decode_armor_state_text(state_text)
+        if push_undo:
+            self.push_undo_snapshot("armor")
+        self.armor_image = new_img
+        self.layer_replaced.emit("armor")
+        self._mark_dirty()
+
     def save_to_file(self, path: Path) -> None:
         from minepainter.io.skin_io import SkinIO
         SkinIO.save(path, self.base_image, self.armor_image)
@@ -1100,6 +1265,8 @@ class SkinDocument(QObject):
         """Save a copy of *layer* before a paint stroke begins."""
         arr = self.base_image if layer == "base" else self.armor_image
         self._undo_stack.append((layer, arr.copy()))
+        # Any new edit invalidates redo history.
+        self._redo_stack.clear()
         # Trim oldest entries to stay within memory budget
         if len(self._undo_stack) > self.MAX_UNDO:
             self._undo_stack.pop(0)
@@ -1109,6 +1276,27 @@ class SkinDocument(QObject):
         if not self._undo_stack:
             return False
         layer, snapshot = self._undo_stack.pop()
+        current = self.base_image if layer == "base" else self.armor_image
+        self._redo_stack.append((layer, current.copy()))
+        if len(self._redo_stack) > self.MAX_UNDO:
+            self._redo_stack.pop(0)
+        if layer == "base":
+            self.base_image = snapshot
+        else:
+            self.armor_image = snapshot
+        self.layer_replaced.emit(layer)
+        self._mark_dirty()
+        return True
+
+    def redo(self) -> bool:
+        """Re-apply the most recently undone snapshot. Returns True if redone."""
+        if not self._redo_stack:
+            return False
+        layer, snapshot = self._redo_stack.pop()
+        current = self.base_image if layer == "base" else self.armor_image
+        self._undo_stack.append((layer, current.copy()))
+        if len(self._undo_stack) > self.MAX_UNDO:
+            self._undo_stack.pop(0)
         if layer == "base":
             self.base_image = snapshot
         else:
@@ -1118,5 +1306,6 @@ class SkinDocument(QObject):
         return True
 
     def clear_undo(self) -> None:
-        """Clear the undo history (called after new / load)."""
+        """Clear the undo/redo history (called after new / load)."""
         self._undo_stack.clear()
+        self._redo_stack.clear()

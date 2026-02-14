@@ -19,15 +19,25 @@ from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox, QStatusBar,
     QWidget, QVBoxLayout,
     QApplication, QDialog, QDialogButtonBox, QFormLayout,
-    QRadioButton, QButtonGroup, QHBoxLayout,
+    QRadioButton, QButtonGroup, QHBoxLayout, QLineEdit, QCheckBox,
 )
 
 from minepainter.document import SkinDocument
-from minepainter.app_settings import load_theme, save_theme, THEME_DARK, THEME_LIGHT
+from minepainter.app_settings import (
+    load_theme,
+    save_theme,
+    load_openai_api_key,
+    save_openai_api_key,
+    load_debug_mode,
+    save_debug_mode,
+    THEME_DARK,
+    THEME_LIGHT,
+)
 from minepainter.home_screen import register_skin_path
 from minepainter.toolbar import AppToolBar
 from minepainter.viewport.viewport_widget import ViewportWidget
 from minepainter.uv_editor.uv_editor_widget import UVEditorWidget
+from minepainter.tools.ai_chat_panel import AIChatPanel
 from minepainter.tools.tool_panel import ToolPanel
 
 
@@ -54,6 +64,7 @@ class MainWindow(QMainWindow):
 
         # --- 3D viewport (needs tool_state for painting) ---
         self._viewport = ViewportWidget(self.document, self._tool_panel.tool_state)
+        self._ai_panel = AIChatPanel(self.document)
 
         # --- Layout ---
         # Left column: UV editor on top, tool strip below it
@@ -76,17 +87,19 @@ class MainWindow(QMainWindow):
         )
         left_vbox.addStretch(1)
 
-        # Main horizontal splitter: left col | viewport | color panel
+        # Main horizontal splitter: left col | viewport | ai chat | color panel
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_col)
         splitter.addWidget(self._viewport)
+        splitter.addWidget(self._ai_panel)
         splitter.addWidget(self._tool_panel.color_panel())
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(0)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([420, 1180, 240])
+        splitter.setStretchFactor(3, 0)
+        splitter.setSizes([420, 880, 360, 240])
         self.setCentralWidget(splitter)
 
         # --- Status bar ---
@@ -133,6 +146,7 @@ class MainWindow(QMainWindow):
         tb.save_as_requested.connect(self._on_save_as)
         tb.reset_requested.connect(self._on_reset)
         tb.undo_requested.connect(self._on_undo)
+        tb.redo_requested.connect(self._on_redo)
         tb.settings_requested.connect(self._on_settings)
         tb.base_visibility_toggled.connect(
             lambda v: self.document.set_layer_visible("base", v)
@@ -164,6 +178,8 @@ class MainWindow(QMainWindow):
         self._tool_panel.tool_state.tool_changed.connect(
             self._tool_panel.sync_tool_button
         )
+        self._ai_panel.apply_armor_state_requested.connect(self._on_ai_apply_armor_state)
+        self._ai_panel.status_message.connect(self._status.showMessage)
 
     # ------------------------------------------------------------------
     # Toolbar action handlers
@@ -210,6 +226,14 @@ class MainWindow(QMainWindow):
             self._status.showMessage("Undone.")
         else:
             self._status.showMessage("Nothing to undo.")
+
+    def _on_redo(self) -> None:
+        """Redo the most recently undone paint stroke."""
+        redone = self.document.redo()
+        if redone:
+            self._status.showMessage("Redone.")
+        else:
+            self._status.showMessage("Nothing to redo.")
 
     def _on_open(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
@@ -281,6 +305,14 @@ class MainWindow(QMainWindow):
         self._viewport.rebuild_meshes(skin_type)
         self._status.showMessage(f"Switched to {skin_type.capitalize()} model.")
 
+    def _on_ai_apply_armor_state(self, armor_state_text: str) -> None:
+        try:
+            # Push undo so Ctrl+Z removes AI-applied armor updates.
+            self.document.apply_armor_state_text(armor_state_text, push_undo=True)
+            self._tool_panel.tool_state.set_layer("armor")
+        except Exception as e:
+            QMessageBox.critical(self, "AI Armor Error", f"Could not apply AI armor state:\n{e}")
+
     def _on_settings(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("Settings")
@@ -307,6 +339,16 @@ class MainWindow(QMainWindow):
         theme_row_layout.addStretch(1)
         layout.addRow("Theme:", theme_row)
 
+        api_key_input = QLineEdit(dialog)
+        api_key_input.setPlaceholderText("sk-...")
+        api_key_input.setText(load_openai_api_key())
+        api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow("OpenAI API key:", api_key_input)
+
+        debug_check = QCheckBox("Enable debug mode (AI logs to terminal)", dialog)
+        debug_check.setChecked(load_debug_mode())
+        layout.addRow("Debug mode:", debug_check)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=dialog,
@@ -320,6 +362,8 @@ class MainWindow(QMainWindow):
 
         theme = THEME_LIGHT if theme_light.isChecked() else THEME_DARK
         save_theme(theme)
+        save_openai_api_key(api_key_input.text())
+        save_debug_mode(debug_check.isChecked())
 
         app = QApplication.instance()
         if app is None:

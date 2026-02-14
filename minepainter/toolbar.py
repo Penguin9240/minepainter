@@ -22,6 +22,7 @@ class AppToolBar(QToolBar):
     save_as_requested      = Signal()
     reset_requested        = Signal()
     undo_requested         = Signal()
+    redo_requested         = Signal()
     settings_requested     = Signal()
     home_requested         = Signal()
     base_visibility_toggled  = Signal(bool)
@@ -54,6 +55,12 @@ class AppToolBar(QToolBar):
         self._act_undo.setToolTip("Undo the last paint stroke (Ctrl+Z)")
         self._act_undo.triggered.connect(self.undo_requested)
         self.addAction(self._act_undo)
+
+        self._act_redo = QAction("Redo", self)
+        self._act_redo.setShortcut("Ctrl+Shift+Z")
+        self._act_redo.setToolTip("Redo the last undone paint stroke (Ctrl+Shift+Z)")
+        self._act_redo.triggered.connect(self.redo_requested)
+        self.addAction(self._act_redo)
 
         self._act_open = QAction("Open…", self)
         self._act_open.setShortcut("Ctrl+O")
