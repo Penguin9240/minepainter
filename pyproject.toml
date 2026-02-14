@@ -1,0 +1,16 @@
+[project]
+name = "minepainter"
+version = "0.1.0"
+description = "Minecraft skin and armor painter with 3D preview"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4.2",
+    "pillow>=12.1.1",
+    "pyopengl>=3.1.10",
+    "pyopengl-accelerate>=3.1.10",
+    "pyside6>=6.10.2",
+]
+
+[project.scripts]
+minepainter = "minepainter.main:main"
