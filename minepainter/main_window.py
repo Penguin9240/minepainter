@@ -18,9 +18,12 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox, QStatusBar,
     QWidget, QVBoxLayout,
+    QApplication, QDialog, QDialogButtonBox, QFormLayout,
+    QRadioButton, QButtonGroup, QHBoxLayout,
 )
 
 from minepainter.document import SkinDocument
+from minepainter.app_settings import load_theme, save_theme, THEME_DARK, THEME_LIGHT
 from minepainter.home_screen import register_skin_path
 from minepainter.toolbar import AppToolBar
 from minepainter.viewport.viewport_widget import ViewportWidget
@@ -130,6 +133,7 @@ class MainWindow(QMainWindow):
         tb.save_as_requested.connect(self._on_save_as)
         tb.reset_requested.connect(self._on_reset)
         tb.undo_requested.connect(self._on_undo)
+        tb.settings_requested.connect(self._on_settings)
         tb.base_visibility_toggled.connect(
             lambda v: self.document.set_layer_visible("base", v)
         )
@@ -276,6 +280,58 @@ class MainWindow(QMainWindow):
         self.document.skin_type = skin_type
         self._viewport.rebuild_meshes(skin_type)
         self._status.showMessage(f"Switched to {skin_type.capitalize()} model.")
+
+    def _on_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Settings")
+        dialog.resize(460, 280)
+        dialog.setMinimumSize(420, 240)
+        layout = QFormLayout(dialog)
+
+        current = load_theme()
+        theme_row = QWidget(dialog)
+        theme_row_layout = QHBoxLayout(theme_row)
+        theme_row_layout.setContentsMargins(0, 0, 0, 0)
+        theme_row_layout.setSpacing(12)
+        theme_dark = QRadioButton("Dark", theme_row)
+        theme_light = QRadioButton("Light", theme_row)
+        theme_group = QButtonGroup(theme_row)
+        theme_group.addButton(theme_dark)
+        theme_group.addButton(theme_light)
+        if current == THEME_LIGHT:
+            theme_light.setChecked(True)
+        else:
+            theme_dark.setChecked(True)
+        theme_row_layout.addWidget(theme_dark)
+        theme_row_layout.addWidget(theme_light)
+        theme_row_layout.addStretch(1)
+        layout.addRow("Theme:", theme_row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        layout.addRow(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        theme = THEME_LIGHT if theme_light.isChecked() else THEME_DARK
+        save_theme(theme)
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        dark_css = app.property("mp_dark_stylesheet")
+        light_css = app.property("mp_light_stylesheet")
+        if theme == THEME_LIGHT:
+            app.setStyleSheet(str(light_css) if light_css is not None else "")
+            self._status.showMessage("Settings saved: Light mode")
+        else:
+            app.setStyleSheet(str(dark_css) if dark_css is not None else "")
+            self._status.showMessage("Settings saved: Dark mode")
 
     # ------------------------------------------------------------------
     # Title bar

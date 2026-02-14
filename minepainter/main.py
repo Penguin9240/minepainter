@@ -14,6 +14,7 @@ import sys
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
+from minepainter.app_settings import load_theme, THEME_LIGHT
 from minepainter.main_window import MainWindow
 from minepainter.home_screen import HomeScreen
 
@@ -216,12 +217,49 @@ QScrollBar::add-line, QScrollBar::sub-line {
 }
 """
 
+_LIGHT_STYLESHEET = """
+QWidget {
+    background-color: #f4f6fb;
+    color: #1b2430;
+    font-size: 12px;
+}
+QMainWindow {
+    background-color: #e9eef8;
+}
+QToolBar {
+    background-color: #dbe6fb;
+    border-bottom: 1px solid #9eb2d9;
+    spacing: 4px;
+    padding: 2px 6px;
+}
+QToolBar QToolButton, QToolBar QPushButton {
+    background-color: #edf2ff;
+    border: 1px solid #9eb2d9;
+    border-radius: 4px;
+    padding: 3px 10px;
+    color: #1b2430;
+}
+QPushButton, QComboBox, QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #9eb2d9;
+    border-radius: 4px;
+    color: #1b2430;
+}
+QStatusBar {
+    background-color: #dbe6fb;
+    color: #334e7d;
+    border-top: 1px solid #9eb2d9;
+}
+"""
+
 
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("MinePainter")
     app.setOrganizationName("MinePainter")
-    app.setStyleSheet(_STYLESHEET)
+    app.setProperty("mp_dark_stylesheet", _STYLESHEET)
+    app.setProperty("mp_light_stylesheet", _LIGHT_STYLESHEET)
+    app.setStyleSheet(_LIGHT_STYLESHEET if load_theme() == THEME_LIGHT else _STYLESHEET)
 
     # Request an OpenGL 3.3 core-profile context for all QOpenGLWidgets.
     fmt = QSurfaceFormat()

@@ -22,6 +22,7 @@ class AppToolBar(QToolBar):
     save_as_requested      = Signal()
     reset_requested        = Signal()
     undo_requested         = Signal()
+    settings_requested     = Signal()
     home_requested         = Signal()
     base_visibility_toggled  = Signal(bool)
     armor_visibility_toggled = Signal(bool)
@@ -68,6 +69,11 @@ class AppToolBar(QToolBar):
         self._act_open_armor_leggings.setToolTip("Load a 64x32 leggings file into armor rows 32..63")
         self._act_open_armor_leggings.triggered.connect(self.open_armor_leggings_requested)
         self.addAction(self._act_open_armor_leggings)
+
+        self._act_settings = QAction("Settings", self)
+        self._act_settings.setToolTip("Open application settings")
+        self._act_settings.triggered.connect(self.settings_requested)
+        self.addAction(self._act_settings)
 
         self._act_save = QAction("Save", self)
         self._act_save.setShortcut("Ctrl+S")
