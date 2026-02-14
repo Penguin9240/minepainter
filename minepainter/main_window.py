@@ -17,7 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QFileDialog, QMessageBox, QStatusBar,
-    QWidget, QVBoxLayout, QScrollArea,
+    QWidget, QVBoxLayout,
 )
 
 from minepainter.document import SkinDocument
@@ -55,25 +55,31 @@ class MainWindow(QMainWindow):
         # --- Layout ---
         # Left column: UV editor on top, tool strip below it
         left_col = QWidget()
-        left_col.setMaximumWidth(360)
+        left_col.setFixedWidth(360)
         left_vbox = QVBoxLayout(left_col)
         left_vbox.setContentsMargins(0, 0, 0, 0)
         left_vbox.setSpacing(0)
-        self._uv_editor.setMaximumHeight(360)
-        left_vbox.addWidget(self._uv_editor, stretch=1)
-        tool_scroll = QScrollArea()
-        tool_scroll.setWidget(self._tool_panel.tool_strip())
-        tool_scroll.setWidgetResizable(True)
-        tool_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        tool_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        tool_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        left_vbox.addWidget(tool_scroll, stretch=0)
+        self._uv_editor.setFixedSize(336, 336)
+        self._uv_editor.set_corner_locked_view(True)
+        left_vbox.addWidget(
+            self._uv_editor,
+            stretch=0,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
+        left_vbox.addWidget(
+            self._tool_panel.tool_strip(),
+            stretch=0,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
+        left_vbox.addStretch(1)
 
         # Main horizontal splitter: left col | viewport | color panel
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_col)
         splitter.addWidget(self._viewport)
         splitter.addWidget(self._tool_panel.color_panel())
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(0)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)

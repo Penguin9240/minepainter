@@ -39,6 +39,8 @@ class UVEditorWidget(QWidget):
         self.zoom: float = 8.0
         # Pan offset in screen pixels
         self.pan: QPointF = QPointF(16.0, 16.0)
+        # Keep the UV map fully visible in the top-left and locked in place.
+        self._lock_corner_view: bool = True
 
         self._painting: bool = False
         self._last_skin_pos: Optional[tuple[int, int]] = None
@@ -55,6 +57,26 @@ class UVEditorWidget(QWidget):
 
         document.pixel_changed.connect(self._on_pixel_changed)
         document.layer_replaced.connect(self._on_layer_replaced)
+
+    def set_corner_locked_view(self, enabled: bool) -> None:
+        """Lock/unlock UV camera so the whole 64x64 stays pinned in-corner."""
+        self._lock_corner_view = bool(enabled)
+        if self._lock_corner_view:
+            self._fit_texture_to_corner()
+            self.update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._lock_corner_view:
+            self._fit_texture_to_corner()
+
+    def _fit_texture_to_corner(self) -> None:
+        """Fit the whole UV texture in this widget and pin it to top-left."""
+        pad = 8.0
+        avail_w = max(1.0, self.width() - pad * 2.0)
+        avail_h = max(1.0, self.height() - pad * 2.0)
+        self.zoom = max(2.0, min(avail_w / 64.0, avail_h / 64.0))
+        self.pan = QPointF(pad, pad)
 
     # ------------------------------------------------------------------
     # Painting
@@ -179,6 +201,8 @@ class UVEditorWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
+            if self._lock_corner_view:
+                return
             self._mid_drag_start = event.position()
             self._mid_drag_pan_start = QPointF(self.pan)
             return
@@ -259,6 +283,8 @@ class UVEditorWidget(QWidget):
             self._last_skin_pos = None
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._lock_corner_view:
+            return
         delta = event.angleDelta().y()
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             # Zoom toward mouse cursor

@@ -11,10 +11,12 @@ from typing import Optional
 
 import numpy as np
 from PIL import Image
+from minepainter.skin_constants import OUTER_UV, BASE_UV
 
 
 class SkinIO:
     VALID_SIZES = {(64, 64), (64, 32)}
+    VALID_ARMOR_LAYER_SIZE = (64, 32)
 
     # ------------------------------------------------------------------
     # Load
@@ -58,20 +60,163 @@ class SkinIO:
         armor_array: Optional[np.ndarray] = None,
     ) -> None:
         """
-        Save the base skin as a standard 64×64 RGBA PNG.
-        If an armor array with any non-transparent pixels is provided,
-        it is saved alongside as '<stem>_armor.png'.
+        Save the base skin as a standard 64x64 RGBA PNG.
+
+        If armor pixels exist, export two armor files:
+          - '<stem>_armor_main.png'     (64x32: helmet + chestplate + arms + boots)
+          - '<stem>_armor_leggings.png' (64x32: leggings only)
         """
         path = Path(path)
-        Image.fromarray(base_array, mode="RGBA").save(path)
+        base_rgba = SkinIO._normalize_rgba(base_array)
+        Image.fromarray(base_rgba, mode="RGBA").save(path)
 
-        if armor_array is not None and armor_array[:, :, 3].any():
-            armor_path = path.with_name(path.stem + "_armor" + path.suffix)
-            Image.fromarray(armor_array, mode="RGBA").save(armor_path)
+        if armor_array is not None:
+            armor_rgba = SkinIO._normalize_rgba(armor_array)
+            if armor_rgba[:, :, 3].any():
+                armor_clean = SkinIO._sanitize_armor_uv(armor_rgba)
+                main_armor, leggings_armor = SkinIO._split_armor_layers_64x32(armor_clean)
+
+                main_path = path.with_name(path.stem + "_armor_main" + path.suffix)
+                Image.fromarray(main_armor, mode="RGBA").save(main_path)
+
+                leggings_path = path.with_name(path.stem + "_armor_leggings" + path.suffix)
+                Image.fromarray(leggings_armor, mode="RGBA").save(leggings_path)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def load_armor_layer(path: Path) -> np.ndarray:
+        """Load a single legacy armor-layer PNG as uint8 RGBA (32, 64, 4)."""
+        img = Image.open(path).convert("RGBA")
+        w, h = img.size
+        if (w, h) != SkinIO.VALID_ARMOR_LAYER_SIZE:
+            raise ValueError(
+                f"Invalid armor layer size {w}x{h}. Expected 64x32."
+            )
+        return np.array(img, dtype=np.uint8)
+
+    @staticmethod
+    def save_armor_layer(path: Path, armor_layer: np.ndarray) -> None:
+        """Save one legacy armor-layer PNG (expects shape 32x64x4 RGBA)."""
+        arr = np.asarray(armor_layer)
+        if arr.shape != (32, 64, 4):
+            raise ValueError(
+                f"Invalid armor layer shape {arr.shape}. Expected (32, 64, 4)."
+            )
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        Image.fromarray(arr, mode="RGBA").save(Path(path))
+
+    @staticmethod
+    def _normalize_rgba(image: np.ndarray) -> np.ndarray:
+        """Return a clipped uint8 RGBA (64x64x4) array."""
+        arr = np.asarray(image)
+        if arr.shape != (64, 64, 4):
+            raise ValueError(f"Invalid image shape {arr.shape}. Expected (64, 64, 4).")
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+        return arr
+
+    @staticmethod
+    def _sanitize_armor_uv(armor: np.ndarray) -> np.ndarray:
+        """
+        Keep armor pixels only inside valid OUTER_UV faces so exported files are
+        always correctly formatted for Minecraft armor overlays.
+        """
+        out = np.zeros_like(armor, dtype=np.uint8)
+        for part_uv in OUTER_UV.values():
+            for px, py, pw, ph in part_uv.values():
+                out[py:py + ph, px:px + pw] = armor[py:py + ph, px:px + pw]
+        return out
+
+    @staticmethod
+    def _merge_face(src_primary: np.ndarray, src_secondary: np.ndarray) -> np.ndarray:
+        """Overlay secondary onto transparent pixels of primary."""
+        out = src_primary.copy()
+        mask = out[:, :, 3] == 0
+        out[mask] = src_secondary[mask]
+        return out
+
+    @staticmethod
+    def _copy_face(src: np.ndarray, dst: np.ndarray, src_uv: tuple[int, int, int, int], dst_uv: tuple[int, int, int, int]) -> None:
+        sx, sy, sw, sh = src_uv
+        dx, dy, dw, dh = dst_uv
+        patch = src[sy:sy + sh, sx:sx + sw]
+        if (sw, sh) != (dw, dh):
+            # Nearest-neighbor scale for safety; normal armor UVs are already 1:1.
+            ys = (np.linspace(0, sh - 1, dh)).astype(int)
+            xs = (np.linspace(0, sw - 1, dw)).astype(int)
+            patch = patch[np.ix_(ys, xs)]
+        dst[dy:dy + dh, dx:dx + dw] = patch
+
+    @staticmethod
+    def _split_armor_layers_64x32(armor: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Convert 64x64 skin-overlay armor into two 64x32 armor layer textures:
+          main: helmet + chestplate + arms + boots
+          leggings: leggings-only
+        """
+        main = np.zeros((32, 64, 4), dtype=np.uint8)
+        leggings = np.zeros((32, 64, 4), dtype=np.uint8)
+
+        # Head and chest map directly to legacy top-half UV positions.
+        for face in ("top", "bottom", "right", "front", "left", "back"):
+            SkinIO._copy_face(armor, main, OUTER_UV["head"][face], BASE_UV["head"][face])
+            SkinIO._copy_face(armor, main, OUTER_UV["body"][face], BASE_UV["body"][face])
+
+        # Arms: legacy armor layer uses one arm template; merge right+left.
+        for face in ("top", "bottom", "right", "front", "left", "back"):
+            rx, ry, rw, rh = OUTER_UV["r_arm"][face]
+            lx, ly, lw, lh = OUTER_UV["l_arm"][face]
+            r_patch = armor[ry:ry + rh, rx:rx + rw]
+            l_patch = armor[ly:ly + lh, lx:lx + lw]
+            merged = SkinIO._merge_face(r_patch, l_patch)
+            dx, dy, dw, dh = BASE_UV["r_arm"][face]
+            main[dy:dy + dh, dx:dx + dw] = merged
+
+        # Legs: split into leggings (top 8 rows) and boots (bottom 4 rows),
+        # then merge right+left into the single legacy leg template.
+        for face in ("front", "back", "right", "left"):
+            rx, ry, rw, rh = OUTER_UV["r_leg"][face]
+            lx, ly, lw, lh = OUTER_UV["l_leg"][face]
+            r_patch = armor[ry:ry + rh, rx:rx + rw]
+            l_patch = armor[ly:ly + lh, lx:lx + lw]
+            merged = SkinIO._merge_face(r_patch, l_patch)  # 4x12
+
+            dx, dy, dw, dh = BASE_UV["r_leg"][face]
+            # Leggings-only top 8 rows
+            leggings[dy:dy + 8, dx:dx + dw] = merged[:8, :]
+            # Boots-only bottom 4 rows
+            main[dy + 8:dy + 12, dx:dx + dw] = merged[8:12, :]
+
+        # Leg top cap -> leggings layer, leg bottom cap -> boots in main layer.
+        r_top = armor[
+            OUTER_UV["r_leg"]["top"][1]:OUTER_UV["r_leg"]["top"][1] + OUTER_UV["r_leg"]["top"][3],
+            OUTER_UV["r_leg"]["top"][0]:OUTER_UV["r_leg"]["top"][0] + OUTER_UV["r_leg"]["top"][2],
+        ]
+        l_top = armor[
+            OUTER_UV["l_leg"]["top"][1]:OUTER_UV["l_leg"]["top"][1] + OUTER_UV["l_leg"]["top"][3],
+            OUTER_UV["l_leg"]["top"][0]:OUTER_UV["l_leg"]["top"][0] + OUTER_UV["l_leg"]["top"][2],
+        ]
+        top_merged = SkinIO._merge_face(r_top, l_top)
+        dx, dy, dw, dh = BASE_UV["r_leg"]["top"]
+        leggings[dy:dy + dh, dx:dx + dw] = top_merged
+
+        r_bottom = armor[
+            OUTER_UV["r_leg"]["bottom"][1]:OUTER_UV["r_leg"]["bottom"][1] + OUTER_UV["r_leg"]["bottom"][3],
+            OUTER_UV["r_leg"]["bottom"][0]:OUTER_UV["r_leg"]["bottom"][0] + OUTER_UV["r_leg"]["bottom"][2],
+        ]
+        l_bottom = armor[
+            OUTER_UV["l_leg"]["bottom"][1]:OUTER_UV["l_leg"]["bottom"][1] + OUTER_UV["l_leg"]["bottom"][3],
+            OUTER_UV["l_leg"]["bottom"][0]:OUTER_UV["l_leg"]["bottom"][0] + OUTER_UV["l_leg"]["bottom"][2],
+        ]
+        bottom_merged = SkinIO._merge_face(r_bottom, l_bottom)
+        dx, dy, dw, dh = BASE_UV["r_leg"]["bottom"]
+        main[dy:dy + dh, dx:dx + dw] = bottom_merged
+
+        return main, leggings
 
     @staticmethod
     def detect_skin_type(image: np.ndarray) -> str:

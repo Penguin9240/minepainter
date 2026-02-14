@@ -207,74 +207,59 @@ class ToolPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _build_tool_strip(self) -> QWidget:
-        """Compact horizontal bar that sits below the UV editor."""
+        """Compact vertical control stack that fits under the fixed UV panel."""
         w = QWidget()
-        w.setFixedHeight(112)
-        # Keep full tool controls visible; parent scroll area handles overflow.
-        w.setMinimumWidth(1020)
-        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        w.setFixedWidth(336)
+        w.setMinimumHeight(360)
+        w.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
-        layout = QHBoxLayout(w)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(10)
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(8)
 
-        # ── Layer selector ─────────────────────────────────────────────
-        layer_w = QWidget()
-        layer_w.setFixedWidth(150)
-        lv = QVBoxLayout(layer_w)
-        lv.setContentsMargins(0, 0, 0, 0)
-        lv.setSpacing(3)
-        lv.addWidget(QLabel("Paint layer:"))
+        # Layer selector
+        layout.addWidget(QLabel("Paint layer:"))
         self._layer_combo = QComboBox()
-        self._layer_combo.addItem("Base skin",     "base")
+        self._layer_combo.addItem("Base skin", "base")
         self._layer_combo.addItem("Armor overlay", "armor")
         self._layer_combo.currentIndexChanged.connect(self._on_layer_changed)
-        lv.addWidget(self._layer_combo)
-        lv.addStretch()
-        layout.addWidget(layer_w)
-        layout.addWidget(self._vsep())
+        layout.addWidget(self._layer_combo)
+        layout.addWidget(self._hsep())
 
-        # ── Tool buttons (2 rows of 4 / 3) ────────────────────────────
-        tool_w = QWidget()
-        tool_w.setMinimumWidth(330)
-        tv = QVBoxLayout(tool_w)
-        tv.setContentsMargins(0, 0, 0, 0)
-        tv.setSpacing(3)
-        tv.addWidget(QLabel("Tool:"))
-
+        # Tool buttons (2 rows)
+        layout.addWidget(QLabel("Tool:"))
         row1 = QHBoxLayout()
-        row1.setSpacing(2)
+        row1.setSpacing(4)
         row2 = QHBoxLayout()
-        row2.setSpacing(2)
-
+        row2.setSpacing(4)
         row1_tools = [
-            ("Brush",     "brush",        "Paint pixels freehand"),
-            ("Eraser",    "eraser",       "Erase pixels"),
-            ("Fill",      "fill",         "Flood-fill a region"),
-            ("Dropper",   "dropper",      "Pick a color from the canvas"),
+            ("Brush", "brush", "Paint pixels freehand"),
+            ("Eraser", "eraser", "Erase pixels"),
+            ("Fill", "fill", "Flood-fill a region"),
+            ("Dropper", "dropper", "Pick a color from the canvas"),
         ]
         row2_tools = [
-            ("Line",      "line",         "Draw a straight line"),
-            ("Rect",      "rect_outline", "Draw a rectangle outline"),
-            ("Rect Fill", "rect_filled",  "Draw a filled rectangle"),
+            ("Line", "line", "Draw a straight line"),
+            ("Rect", "rect_outline", "Draw a rectangle outline"),
+            ("Rect Fill", "rect_filled", "Draw a filled rectangle"),
         ]
-
         for label, name, tip in row1_tools:
             row1.addWidget(self._make_tool_btn(label, name, tip))
         for label, name, tip in row2_tools:
             row2.addWidget(self._make_tool_btn(label, name, tip))
-
+        row2.addStretch(1)
         self._tool_buttons["brush"].setChecked(True)
         self._tool_group.buttonClicked.connect(self._on_tool_clicked)
+        layout.addLayout(row1)
+        layout.addLayout(row2)
+        layout.addWidget(self._hsep())
 
-        tv.addLayout(row1)
-        tv.addLayout(row2)
-        layout.addWidget(tool_w)
-        layout.addWidget(self._vsep())
+        # Brush + view controls in one row
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(8)
 
-        # ── Brush size ─────────────────────────────────────────────────
         brush_w = QWidget()
-        brush_w.setFixedWidth(170)
+        brush_w.setFixedWidth(155)
         bv = QVBoxLayout(brush_w)
         bv.setContentsMargins(0, 0, 0, 0)
         bv.setSpacing(3)
@@ -285,28 +270,10 @@ class ToolPanel(QWidget):
         self._brush_slider.setValue(1)
         self._brush_slider.valueChanged.connect(self._on_brush_changed)
         bv.addWidget(self._brush_slider)
-        bv.addStretch()
-        layout.addWidget(brush_w)
-        layout.addWidget(self._vsep())
+        controls_row.addWidget(brush_w)
 
-        # ── Armor piece visibility ────────────────────────────────────
-        armor_w = QWidget()
-        armor_w.setFixedWidth(150)
-        av = QVBoxLayout(armor_w)
-        av.setContentsMargins(0, 0, 0, 0)
-        av.setSpacing(3)
-        self._parts_label = QLabel("Armor pieces:")
-        av.addWidget(self._parts_label)
-        self._armor_selector = ArmorMiniSelector()
-        self._armor_selector.part_toggled.connect(self._on_part_toggled)
-        av.addWidget(self._armor_selector, alignment=Qt.AlignmentFlag.AlignLeft)
-        av.addStretch()
-        layout.addWidget(armor_w)
-        layout.addWidget(self._vsep())
-
-        # ── View mode ─────────────────────────────────────────────────
         mode_w = QWidget()
-        mode_w.setFixedWidth(210)
+        mode_w.setFixedWidth(155)
         mv = QVBoxLayout(mode_w)
         mv.setContentsMargins(0, 0, 0, 0)
         mv.setSpacing(3)
@@ -325,10 +292,18 @@ class ToolPanel(QWidget):
             lambda _i: self.pose_changed.emit(self._pose_combo.currentData())
         )
         mv.addWidget(self._pose_combo)
-        mv.addStretch()
-        layout.addWidget(mode_w)
+        controls_row.addWidget(mode_w)
 
-        layout.addStretch()
+        layout.addLayout(controls_row)
+        layout.addWidget(self._hsep())
+
+        # Piece selector
+        self._parts_label = QLabel("Armor pieces:")
+        layout.addWidget(self._parts_label)
+        self._armor_selector = ArmorMiniSelector()
+        self._armor_selector.part_toggled.connect(self._on_part_toggled)
+        layout.addWidget(self._armor_selector, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch(1)
         return w
 
     def _build_color_panel(self) -> QWidget:
@@ -354,7 +329,7 @@ class ToolPanel(QWidget):
         btn.setCheckable(True)
         btn.setProperty("tool_name", name)
         btn.setToolTip(tip)
-        btn.setFixedWidth(70)
+        btn.setFixedWidth(74)
         self._tool_group.addButton(btn)
         self._tool_buttons[name] = btn
         return btn
