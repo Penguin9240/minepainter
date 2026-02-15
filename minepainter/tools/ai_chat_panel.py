@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Optional
 
 from PySide6.QtCore import QThread, Signal, Qt
@@ -22,32 +23,68 @@ _SYSTEM_PROMPT = (
     "You are MinePainter's armor assistant. "
     "You always return STRICT JSON with keys: "
     "\"message\" (string) and \"armor_state\" (object). "
-    "\"armor_state\" must be JSON using MinePainter schema: "
-    "version=2, format='minepainter_armor_state_v2', width=64, height=64, and areas. "
-    "areas must contain sections: helmet, chestplate, arms, leggings, boots. "
-    "Each area contains named faces and each face has 'uv' and 'pixels'. "
-    "'pixels' must be a 2D grid with [r,g,b,a] per pixel (0..255). "
-    "You must preserve exact per-face pixel matrix dimensions and valid UV arrays. "
-    "Always include an armor_state. If no visual change is needed, return the input armor_state unchanged."
+    "\"armor_state\" must be FULL state JSON using schema: "
+    "version=1, format='minepainter_armor_hex_state_v1', width=64, height=64, and areas. "
+    "All areas/faces must be present in the reply. "
+    "Each face must include uv and pixels_hex. "
+    "pixels_hex must be a full 2D grid of 8-char RRGGBBAA (no #). "
+    "Keep UV arrays valid and face dimensions exact."
 )
 
+_HEX8_RE = re.compile(r"^[0-9A-Fa-f]{8}$")
 
-def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any]:
-    """Build a strict JSON schema that locks armor face pixel dimensions to input state."""
-    parsed = json.loads(armor_state_text)
-    if not isinstance(parsed, dict):
-        raise ValueError("Current armor_state must be a JSON object.")
-    areas = parsed.get("areas")
+
+def _rgba_to_hex8(px: list[int]) -> str:
+    if len(px) != 4:
+        raise ValueError("RGBA pixel must have 4 components.")
+    return f"{px[0]:02X}{px[1]:02X}{px[2]:02X}{px[3]:02X}"
+
+
+def _hex8_to_rgba(hex8: str) -> list[int]:
+    if not isinstance(hex8, str) or not _HEX8_RE.fullmatch(hex8):
+        raise ValueError(f"Invalid 8-char hex pixel: {hex8!r}")
+    return [
+        int(hex8[0:2], 16),
+        int(hex8[2:4], 16),
+        int(hex8[4:6], 16),
+        int(hex8[6:8], 16),
+    ]
+
+
+def _state_obj_to_hex_state(state_obj: dict[str, Any]) -> dict[str, Any]:
+    """Convert full armor_state [r,g,b,a] pixels to compact 8-char hex."""
+    areas = state_obj.get("areas")
     if not isinstance(areas, dict):
         raise ValueError("Current armor_state must include areas object.")
-
-    pixel_schema: dict[str, Any] = {
-        "type": "array",
-        "minItems": 4,
-        "maxItems": 4,
-        "items": {"type": "integer", "minimum": 0, "maximum": 255},
+    out_areas: dict[str, Any] = {}
+    for area_name, area_obj in areas.items():
+        if not isinstance(area_obj, dict):
+            raise ValueError(f"Invalid area '{area_name}'.")
+        out_faces: dict[str, Any] = {}
+        for face_name, face_obj in area_obj.items():
+            if not isinstance(face_obj, dict):
+                raise ValueError(f"Invalid face '{area_name}.{face_name}'.")
+            uv = face_obj.get("uv")
+            pixels = face_obj.get("pixels")
+            if not isinstance(uv, list) or len(uv) != 4 or not isinstance(pixels, list):
+                raise ValueError(f"Invalid face data '{area_name}.{face_name}'.")
+            pixels_hex = [[_rgba_to_hex8(px) for px in row] for row in pixels]
+            out_faces[face_name] = {"uv": uv, "pixels_hex": pixels_hex}
+        out_areas[area_name] = out_faces
+    return {
+        "version": 1,
+        "format": "minepainter_armor_hex_state_v1",
+        "width": 64,
+        "height": 64,
+        "areas": out_areas,
     }
 
+
+def _build_hex_state_reply_schema_from_state(state_obj: dict[str, Any]) -> dict[str, Any]:
+    """Build strict JSON schema for assistant full-state hex replies."""
+    areas = state_obj.get("areas")
+    if not isinstance(areas, dict):
+        raise ValueError("Current armor_state must include areas object.")
     area_properties: dict[str, Any] = {}
     area_required: list[str] = []
     for area_name, area_obj in areas.items():
@@ -68,17 +105,19 @@ def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any
             w = len(pixels[0])
             if h <= 0 or w <= 0:
                 raise ValueError(f"area '{area_name}' face '{face_name}' has empty pixels.")
-
             row_schema: dict[str, Any] = {
                 "type": "array",
                 "minItems": w,
                 "maxItems": w,
-                "items": pixel_schema,
+                "items": {
+                    "type": "string",
+                    "pattern": "^[0-9A-Fa-f]{8}$",
+                },
             }
             face_properties[face_name] = {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["uv", "pixels"],
+                "required": ["uv", "pixels_hex"],
                 "properties": {
                     "uv": {
                         "type": "array",
@@ -86,7 +125,7 @@ def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any
                         "maxItems": 4,
                         "items": {"type": "integer", "minimum": 0, "maximum": 63},
                     },
-                    "pixels": {
+                    "pixels_hex": {
                         "type": "array",
                         "minItems": h,
                         "maxItems": h,
@@ -95,7 +134,6 @@ def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any
                 },
             }
             face_required.append(face_name)
-
         area_properties[area_name] = {
             "type": "object",
             "additionalProperties": False,
@@ -109,8 +147,8 @@ def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any
         "additionalProperties": False,
         "required": ["version", "format", "width", "height", "areas"],
         "properties": {
-            "version": {"type": "integer", "enum": [2]},
-            "format": {"type": "string", "enum": ["minepainter_armor_state_v2"]},
+            "version": {"type": "integer", "enum": [1]},
+            "format": {"type": "string", "enum": ["minepainter_armor_hex_state_v1"]},
             "width": {"type": "integer", "enum": [64]},
             "height": {"type": "integer", "enum": [64]},
             "areas": {
@@ -132,7 +170,7 @@ def _build_armor_reply_schema_from_state(armor_state_text: str) -> dict[str, Any
     }
 
 
-def _parse_payload(text: str) -> tuple[str, str]:
+def _parse_payload(text: str) -> tuple[str, dict[str, Any]]:
     payload = None
     try:
         payload = json.loads(text)
@@ -149,10 +187,73 @@ def _parse_payload(text: str) -> tuple[str, str]:
         raise ValueError("Assistant reply is missing armor_state.")
     if not isinstance(armor_state_obj, dict):
         raise ValueError("Assistant armor_state must be a JSON object.")
-    armor_state = json.dumps(armor_state_obj, separators=(",", ":"))
     if not message:
         message = "(No message)"
-    return message, armor_state
+    return message, armor_state_obj
+
+
+def _hex_state_obj_to_rgba_state(
+    hex_state_obj: dict[str, Any],
+    expected_state_obj: dict[str, Any],
+) -> dict[str, Any]:
+    """Convert full hex armor_state object to full RGBA armor_state object."""
+    if hex_state_obj.get("version") != 1 or hex_state_obj.get("format") != "minepainter_armor_hex_state_v1":
+        raise ValueError("Invalid armor_state version/format.")
+    if hex_state_obj.get("width") != 64 or hex_state_obj.get("height") != 64:
+        raise ValueError("Invalid armor_state dimensions.")
+
+    hex_areas = hex_state_obj.get("areas")
+    expected_areas = expected_state_obj.get("areas")
+    if not isinstance(hex_areas, dict) or not isinstance(expected_areas, dict):
+        raise ValueError("armor_state.areas must be an object.")
+
+    out_areas: dict[str, Any] = {}
+    for area_name, area_expected in expected_areas.items():
+        if not isinstance(area_expected, dict):
+            raise ValueError(f"Invalid expected area '{area_name}'.")
+        area_hex = hex_areas.get(area_name)
+        if not isinstance(area_hex, dict):
+            raise ValueError(f"Missing area '{area_name}'.")
+        out_faces: dict[str, Any] = {}
+        for face_name, face_expected in area_expected.items():
+            if not isinstance(face_expected, dict):
+                raise ValueError(f"Invalid expected face '{area_name}.{face_name}'.")
+            face_hex = area_hex.get(face_name)
+            if not isinstance(face_hex, dict):
+                raise ValueError(f"Missing face '{area_name}.{face_name}'.")
+            expected_uv = face_expected.get("uv")
+            got_uv = face_hex.get("uv")
+            if got_uv != expected_uv:
+                raise ValueError(
+                    f"UV mismatch for '{area_name}.{face_name}': got {got_uv!r}, expected {expected_uv!r}."
+                )
+            old_pixels = face_expected.get("pixels")
+            rows = face_hex.get("pixels_hex")
+            if not isinstance(old_pixels, list) or not isinstance(rows, list):
+                raise ValueError(f"Missing pixels for '{area_name}.{face_name}'.")
+            h = len(old_pixels)
+            w = len(old_pixels[0]) if h > 0 else 0
+            if len(rows) != h:
+                raise ValueError(
+                    f"Height mismatch for '{area_name}.{face_name}': got {len(rows)}, expected {h}."
+                )
+            new_pixels: list[list[list[int]]] = []
+            for row in rows:
+                if not isinstance(row, list) or len(row) != w:
+                    raise ValueError(
+                        f"Width mismatch for '{area_name}.{face_name}': expected {w} per row."
+                    )
+                new_pixels.append([_hex8_to_rgba(px) for px in row])
+            out_faces[face_name] = {"uv": expected_uv, "pixels": new_pixels}
+        out_areas[area_name] = out_faces
+
+    return {
+        "version": 2,
+        "format": "minepainter_armor_state_v2",
+        "width": 64,
+        "height": 64,
+        "areas": out_areas,
+    }
 
 
 def request_ai_armor_reply(
@@ -177,17 +278,19 @@ def request_ai_armor_reply(
         print(f"[AI DEBUG] {label}:\n{text}\n", flush=True)
 
     client = OpenAI(api_key=api_key, max_retries=0, timeout=240)
-    # Validate input state and build strict output schema from it.
+    # Validate input and build strict full-state schema from it.
     SkinDocument.decode_armor_state_text(armor_state_text)
-    schema = _build_armor_reply_schema_from_state(armor_state_text)
-    compact_state = json.dumps(json.loads(armor_state_text), separators=(",", ":"))
+    base_state_obj = json.loads(armor_state_text)
+    schema = _build_hex_state_reply_schema_from_state(base_state_obj)
+    compact_state = json.dumps(_state_obj_to_hex_state(base_state_obj), separators=(",", ":"))
     base_user_payload = (
         "Conversation:\n"
         f"{history_text}\n\n"
         "User request:\n"
         f"{user_text}\n\n"
-        "Current armor_state (JSON):\n"
+        "Current armor state in compact HEX JSON:\n"
         f"{compact_state}\n\n"
+        "Return a full updated armor_state in this same hex format.\n"
         "Return JSON only."
     )
     _debug_log("OUTBOUND_SYSTEM", _SYSTEM_PROMPT)
@@ -200,7 +303,7 @@ def request_ai_armor_reply(
         response = client.responses.create(
             model=model,
             temperature=0,
-            max_output_tokens=40000,
+            max_output_tokens=20000,
             text={
                 "format": {
                     "type": "json_schema",
@@ -221,11 +324,15 @@ def request_ai_armor_reply(
         _debug_log(f"INBOUND_RAW_ATTEMPT_{attempt}", text)
 
         try:
-            message, armor_state = _parse_payload(text)
-            # Strong validation before returning.
+            message, armor_state_hex_obj = _parse_payload(text)
+            armor_state_rgba_obj = _hex_state_obj_to_rgba_state(
+                armor_state_hex_obj,
+                base_state_obj,
+            )
+            armor_state = json.dumps(armor_state_rgba_obj, separators=(",", ":"))
             SkinDocument.decode_armor_state_text(armor_state)
             _debug_log("INBOUND_PARSED_MESSAGE", message)
-            _debug_log("INBOUND_PARSED_ARMOR_STATE", armor_state)
+            _debug_log("INBOUND_PARSED_ARMOR_STATE_HEX", json.dumps(armor_state_hex_obj, separators=(",", ":")))
             return message, armor_state
         except Exception as e:
             last_err = str(e)
@@ -235,9 +342,12 @@ def request_ai_armor_reply(
                 f"Validation error: {last_err}\n"
                 "Fix and return JSON only.\n"
                 "Requirements:\n"
-                "1) armor_state must match the same schema as input.\n"
-                "2) For every face, pixels matrix dimensions must exactly match its UV width/height.\n"
-                "3) Keep all UV arrays valid.\n"
+                "1) Return keys: message + armor_state.\n"
+                "2) armor_state format: version=1, format=minepainter_armor_hex_state_v1, width=64, height=64.\n"
+                "3) Return FULL state for all areas/faces (no patch format).\n"
+                "4) Each face must include uv and pixels_hex.\n"
+                "5) pixels_hex values must be 8-char RRGGBBAA (no #).\n"
+                "6) Keep exact UV arrays and exact face dimensions.\n"
             )
             continue
     raise RuntimeError(f"Assistant failed to return valid armor state after {max_attempts} attempts: {last_err}")
