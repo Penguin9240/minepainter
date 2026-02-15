@@ -293,18 +293,16 @@ def request_ai_armor_reply(
         "Return a full updated armor_state in this same hex format.\n"
         "Return JSON only."
     )
-    _debug_log("OUTBOUND_SYSTEM", _SYSTEM_PROMPT)
+    _debug_log("OUTBOUND_USER_MESSAGE", user_text)
 
     last_err = "unknown"
     retry_suffix = ""
     for attempt in range(1, max_attempts + 1):
         user_payload = base_user_payload + retry_suffix
-        _debug_log(f"OUTBOUND_USER_ATTEMPT_{attempt}", user_payload)
-        response = client.responses.create(
-            model=model,
-            temperature=0,
-            max_output_tokens=12000,
-            text={
+        request_kwargs: dict[str, Any] = {
+            "model": model,
+            "max_output_tokens": 12000,
+            "text": {
                 "format": {
                     "type": "json_schema",
                     "name": "minepainter_armor_reply",
@@ -312,16 +310,20 @@ def request_ai_armor_reply(
                     "schema": schema,
                 }
             },
-            input=[
+            "input": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_payload},
             ],
-        )
+        }
+        # Some models (notably gpt-5 variants) reject the temperature parameter.
+        if not model.startswith("gpt-5"):
+            request_kwargs["temperature"] = 0
+
+        response = client.responses.create(**request_kwargs)
 
         text = getattr(response, "output_text", None)
         if not text:
             text = str(response)
-        _debug_log(f"INBOUND_RAW_ATTEMPT_{attempt}", text)
 
         try:
             message, armor_state_hex_obj = _parse_payload(text)
@@ -332,7 +334,6 @@ def request_ai_armor_reply(
             armor_state = json.dumps(armor_state_rgba_obj, separators=(",", ":"))
             SkinDocument.decode_armor_state_text(armor_state)
             _debug_log("INBOUND_PARSED_MESSAGE", message)
-            _debug_log("INBOUND_PARSED_ARMOR_STATE_HEX", json.dumps(armor_state_hex_obj, separators=(",", ":")))
             return message, armor_state
         except Exception as e:
             last_err = str(e)
@@ -461,8 +462,6 @@ class AIChatPanel(QWidget):
         debug_mode = load_debug_mode()
         if debug_mode:
             print(f"[AI DEBUG] UI outbound user message:\n{text}\n", flush=True)
-            print(f"[AI DEBUG] UI selected model:\n{model}\n", flush=True)
-            print(f"[AI DEBUG] UI outbound armor_state:\n{armor_state}\n", flush=True)
         self._worker = _AIRequestThread(api_key, model, text, armor_state, history_text, debug_mode)
         self._worker.finished_payload.connect(self._on_result)
         self._worker.failed.connect(self._on_error)
@@ -472,14 +471,6 @@ class AIChatPanel(QWidget):
     def _on_result(self, message: str, armor_state: str) -> None:
         if load_debug_mode():
             print(f"[AI DEBUG] UI inbound assistant message:\n{message}\n", flush=True)
-            try:
-                rgba_obj = json.loads(armor_state)
-                hex_obj = _state_obj_to_hex_state(rgba_obj)
-                hex_text = json.dumps(hex_obj, separators=(",", ":"))
-                print(f"[AI DEBUG] UI inbound armor_state_hex:\n{hex_text}\n", flush=True)
-            except Exception:
-                # Fall back to raw text if conversion fails for any reason.
-                print(f"[AI DEBUG] UI inbound armor_state:\n{armor_state}\n", flush=True)
         self._append("Assistant", message)
         self.apply_armor_state_requested.emit(armor_state)
         self.status_message.emit("AI assistant: armor updated.")
