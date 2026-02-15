@@ -303,7 +303,7 @@ def request_ai_armor_reply(
         response = client.responses.create(
             model=model,
             temperature=0,
-            max_output_tokens=20000,
+            max_output_tokens=12000,
             text={
                 "format": {
                     "type": "json_schema",
@@ -472,7 +472,14 @@ class AIChatPanel(QWidget):
     def _on_result(self, message: str, armor_state: str) -> None:
         if load_debug_mode():
             print(f"[AI DEBUG] UI inbound assistant message:\n{message}\n", flush=True)
-            print(f"[AI DEBUG] UI inbound armor_state:\n{armor_state}\n", flush=True)
+            try:
+                rgba_obj = json.loads(armor_state)
+                hex_obj = _state_obj_to_hex_state(rgba_obj)
+                hex_text = json.dumps(hex_obj, separators=(",", ":"))
+                print(f"[AI DEBUG] UI inbound armor_state_hex:\n{hex_text}\n", flush=True)
+            except Exception:
+                # Fall back to raw text if conversion fails for any reason.
+                print(f"[AI DEBUG] UI inbound armor_state:\n{armor_state}\n", flush=True)
         self._append("Assistant", message)
         self.apply_armor_state_requested.emit(armor_state)
         self.status_message.emit("AI assistant: armor updated.")
