@@ -87,6 +87,12 @@ class AppToolBar(QToolBar):
         self._act_save.triggered.connect(self.save_requested)
         self.addAction(self._act_save)
 
+        self._act_save_as = QAction("Save As...", self)
+        self._act_save_as.setShortcut("Ctrl+Shift+S")
+        self._act_save_as.setToolTip("Save to a new file (Ctrl+Shift+S)")
+        self._act_save_as.triggered.connect(self.save_as_requested)
+        self.addAction(self._act_save_as)
+
         self.addSeparator()
 
         self._act_base = QAction("Base skin", self)
