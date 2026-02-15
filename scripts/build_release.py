@@ -9,9 +9,42 @@ from pathlib import Path
 
 APP_NAME = "MinePainter"
 ENTRYPOINT = "minepainter/main.py"
+ICON_SOURCE = Path("MinepainterLogo.png")
+
+
+def _ensure_icon() -> Path:
+    if not ICON_SOURCE.exists():
+        raise FileNotFoundError(f"Missing icon source image: {ICON_SOURCE}")
+
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Pillow is required to generate app icon files") from exc
+
+    out_dir = Path("build") / "icons"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if sys.platform == "darwin":
+        icns_path = out_dir / "MinePainter.icns"
+        image = Image.open(ICON_SOURCE).convert("RGBA")
+        image.save(icns_path, format="ICNS")
+        return icns_path
+
+    if sys.platform.startswith("win"):
+        ico_path = out_dir / "MinePainter.ico"
+        image = Image.open(ICON_SOURCE).convert("RGBA")
+        image.save(
+            ico_path,
+            format="ICO",
+            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        )
+        return ico_path
+
+    raise RuntimeError(f"Unsupported platform for icon generation: {sys.platform}")
 
 
 def run_pyinstaller() -> None:
+    icon_path = _ensure_icon()
     cmd = [
         sys.executable,
         "-m",
@@ -20,6 +53,8 @@ def run_pyinstaller() -> None:
         "--windowed",
         "--name",
         APP_NAME,
+        "--icon",
+        str(icon_path),
         "--collect-all",
         "PySide6",
         "--collect-submodules",
@@ -39,8 +74,22 @@ def prepare_release_asset() -> Path:
         app_bundle = Path("dist") / f"{APP_NAME}.app"
         if not app_bundle.exists():
             raise FileNotFoundError(f"Missing expected macOS bundle: {app_bundle}")
-        archive_base = release_dir / "MinePainter.app"
-        zip_path = Path(shutil.make_archive(str(archive_base), "zip", "dist", f"{APP_NAME}.app"))
+        zip_path = release_dir / "MinePainter.app.zip"
+        if zip_path.exists():
+            zip_path.unlink()
+        # Use `ditto` for macOS app bundles so symlinks/metadata are preserved.
+        subprocess.run(
+            [
+                "ditto",
+                "-c",
+                "-k",
+                "--sequesterRsrc",
+                "--keepParent",
+                str(app_bundle),
+                str(zip_path),
+            ],
+            check=True,
+        )
         return zip_path
 
     if sys.platform.startswith("win"):
